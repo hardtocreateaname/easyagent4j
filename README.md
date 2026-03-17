@@ -20,6 +20,10 @@
 - 🎯 **注解式工具定义** — 使用 `@AgentTool` 注解快速将 Spring Bean 方法暴露为 Agent 工具
 - 🧠 **上下文管理** — 可插拔的消息转换器，支持滑动窗口、Token 预算等策略
 - 🚀 **Spring Boot Starter** — 开箱即用的自动配置，引入依赖即可使用
+- 🧠 **记忆系统** — 基于 Markdown 文件的持久化记忆，支持长期记忆/短期记忆/用户偏好，MemoryPromptBuilder 自动将记忆注入 system prompt
+- 🎭 **性格系统** — 可配置 Agent 性格（名称/角色/语气/风格/边界），支持 JSON 和 Markdown 双格式定义，灵感来自 OpenClaw 的 SOUL.md
+- 🔄 **自主任务循环** — LLM 驱动的任务规划与执行，支持自动 replan 和审查机制
+- 🔁 **容错重试** — 内置 RetryPolicy（指数退避），工具失败自动重试
 
 ## 🚀 快速开始
 
@@ -29,7 +33,7 @@
 <dependency>
     <groupId>com.easyagent4j</groupId>
     <artifactId>easyagent4j-spring-boot-starter</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -123,6 +127,10 @@ easyagent4j/
 │   ├── event/                           # 事件系统（Publisher, Listener, 各类事件）
 │   ├── message/                         # 消息模型（User, Assistant, System, ToolResult）
 │   ├── tool/                            # 工具系统（AgentTool, ToolDefinition, ToolHook）
+│   ├── memory/                          # 记忆模块（MemoryStore, FileMemoryStore, MemoryPromptBuilder）
+│   ├── personality/                     # 性格模块（AgentPersonality, PersonalityLoader）
+│   ├── task/                            # 自主任务（TaskPlan, AutonomousAgentLoop, DefaultTaskPlanner）
+│   ├── resilience/                      # 容错（RetryPolicy）
 │   └── exception/                       # 异常体系
 ├── easyagent4j-spring/                  # Spring AI 集成
 │   ├── autoconfigure/                   # 自动配置
@@ -205,6 +213,70 @@ agent.applySteering(AgentSteering.of(
 ));
 ```
 
+### 记忆系统
+
+基于 Markdown 文件的持久化记忆，支持长期记忆、短期记忆和用户偏好三种类型：
+
+```java
+// 配置记忆存储
+MemoryStore memoryStore = new FileMemoryStore("/path/to/memory");
+
+// 保存记忆
+MemoryEntry entry = MemoryEntry.builder()
+    .type(MemoryType.LONG_TERM)
+    .content("用户偏好使用 Python 进行数据分析")
+    .tags("preference", "python")
+    .build();
+memoryStore.save(entry);
+
+// 查询记忆
+List<MemoryEntry> memories = memoryStore.search("数据分析");
+
+// MemoryPromptBuilder 自动将记忆注入 system prompt
+MemoryPromptBuilder promptBuilder = new MemoryPromptBuilder(memoryStore);
+String enrichedPrompt = promptBuilder.build(originalPrompt);
+```
+
+在 `application.yml` 中配置：
+
+```yaml
+easyagent:
+  memory:
+    enabled: true
+    base-path: ./memory
+```
+
+### 自主任务循环
+
+LLM 驱动的任务规划与执行，支持自动 replan 和审查机制：
+
+```java
+// 启用自主模式
+AgentConfig config = AgentConfig.builder()
+    .autonomous(true)
+    .build();
+
+// 自主 Agent 会自动规划任务并执行
+Agent agent = new Agent(config, chatModel);
+agent.registerTool(myTool);
+
+String result = agent.chat("帮我分析最近的销售数据并生成报告");
+// Agent 会自动分解任务、调用工具、生成报告
+```
+
+自主模式工作流程：
+1. LLM 生成任务计划（TaskPlan）
+2. 按计划执行任务步骤（TaskStep）
+3. 每步执行后检查是否需要 replan
+4. 所有任务完成后进行审查并返回结果
+
+在 `application.yml` 中启用：
+
+```yaml
+easyagent:
+  autonomous: true
+```
+
 ## ⚙️ 配置参考
 
 | 配置项 | 默认值 | 说明 |
@@ -214,6 +286,11 @@ agent.applySteering(AgentSteering.of(
 | `easyagent.tool-execution-mode` | `PARALLEL` | 工具执行模式：`PARALLEL`（并行）/ `SEQUENTIAL`（串行） |
 | `easyagent.streaming` | `true` | 是否启用流式输出 |
 | `easyagent.context.max-messages` | `50` | 上下文最大消息数（滑动窗口） |
+| `easyagent.personality.path` | - | 性格配置文件路径（JSON 或 Markdown 格式） |
+| `easyagent.memory.base-path` | - | 记忆文件存储路径 |
+| `easyagent.memory.enabled` | `false` | 是否启用记忆系统 |
+| `easyagent.retry.max-retries` | `3` | 最大重试次数 |
+| `easyagent.autonomous` | `false` | 是否启用自主模式（任务循环） |
 
 ## 🏗️ 架构设计
 
@@ -249,6 +326,13 @@ agent.applySteering(AgentSteering.of(
 │  │ LLM API  │              │ EventListeners │    │
 │  │(OpenAI等)│              │  (Metrics等)   │    │
 │  └──────────┘              └────────────────┘    │
+│                      │                            │
+│       ┌──────────────┼──────────────┐             │
+│       ▼              ▼              ▼             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐    │
+│  │MemoryStore│  │Personality│  │TaskPlanner   │    │
+│  │ (Memory)  │  │(Soul)    │  │ (Autonomous) │    │
+│  └──────────┘  └──────────┘  └──────────────┘    │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -258,6 +342,7 @@ agent.applySteering(AgentSteering.of(
 - **事件驱动** — 所有生命周期关键节点发布事件，支持可插拔监听
 - **可扩展** — 工具、消息转换器、事件监听器均通过接口定义，易于扩展
 - **轻量优先** — 核心模块无外部依赖（除 SLF4J），按需引入 Spring AI
+- **Markdown优先** — 记忆和性格均以 Markdown 文件存储，对 LLM 友好、人类可读
 
 ## 📄 License
 
