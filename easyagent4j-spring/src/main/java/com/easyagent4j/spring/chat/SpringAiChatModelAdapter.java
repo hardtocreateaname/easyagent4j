@@ -29,7 +29,16 @@ public class SpringAiChatModelAdapter implements com.easyagent4j.core.chat.ChatM
 
     @Override
     public ChatResponse call(ChatRequest request) {
-        List<Message> springMessages = convertMessages(request.getMessages());
+        List<Message> springMessages = new ArrayList<>();
+        
+        // Add system prompt if present
+        if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
+            springMessages.add(new org.springframework.ai.chat.messages.SystemMessage(request.getSystemPrompt()));
+        }
+        
+        // Add other messages
+        springMessages.addAll(convertMessages(request.getMessages()));
+        
         Prompt prompt = new Prompt(springMessages);
 
         org.springframework.ai.chat.model.ChatResponse springResponse = springChatModel.call(prompt);
@@ -38,13 +47,43 @@ public class SpringAiChatModelAdapter implements com.easyagent4j.core.chat.ChatM
 
     @Override
     public void stream(ChatRequest request, Consumer<ChatResponseChunk> callback) {
-        List<Message> springMessages = convertMessages(request.getMessages());
+        List<Message> springMessages = new ArrayList<>();
+        
+        // Add system prompt if present
+        if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
+            springMessages.add(new org.springframework.ai.chat.messages.SystemMessage(request.getSystemPrompt()));
+        }
+        
+        // Add other messages
+        springMessages.addAll(convertMessages(request.getMessages()));
+        
         Prompt prompt = new Prompt(springMessages);
 
+        // Track accumulated text to handle streaming responses that return cumulative content
+        final StringBuilder accumulated = new StringBuilder();
+
         Flux<org.springframework.ai.chat.model.ChatResponse> flux = springChatModel.stream(prompt);
-        flux.subscribe(chunk -> {
-            callback.accept(convertChunk(chunk));
-        });
+        flux.subscribe(
+            chunk -> {
+                ChatResponseChunk result = convertChunk(chunk);
+                if (result.getText() != null && !result.getText().isEmpty()) {
+                    callback.accept(result);
+                }
+            },
+            error -> {
+                // Handle error
+                ChatResponseChunk errorChunk = new ChatResponseChunk();
+                errorChunk.setText("[Error: " + error.getMessage() + "]");
+                errorChunk.setFinished(true);
+                callback.accept(errorChunk);
+            },
+            () -> {
+                // Stream completed
+                ChatResponseChunk doneChunk = new ChatResponseChunk();
+                doneChunk.setFinished(true);
+                callback.accept(doneChunk);
+            }
+        );
     }
 
     @SuppressWarnings("unchecked")
@@ -54,6 +93,17 @@ public class SpringAiChatModelAdapter implements com.easyagent4j.core.chat.ChatM
             if (msg instanceof Message) {
                 // Already a Spring AI Message
                 result.add((Message) msg);
+            } else if (msg instanceof java.util.Map) {
+                // Handle Map-based messages (e.g., Map.of("role", "user", "content", "..."))
+                java.util.Map<String, Object> mapMsg = (java.util.Map<String, Object>) msg;
+                String role = mapMsg.get("role") != null ? mapMsg.get("role").toString().toLowerCase() : "user";
+                String content = mapMsg.get("content") != null ? mapMsg.get("content").toString() : "";
+                switch (role) {
+                    case "user" -> result.add(new org.springframework.ai.chat.messages.UserMessage(content));
+                    case "assistant" -> result.add(new org.springframework.ai.chat.messages.AssistantMessage(content));
+                    case "system" -> result.add(new org.springframework.ai.chat.messages.SystemMessage(content));
+                    default -> result.add(new org.springframework.ai.chat.messages.UserMessage(content));
+                }
             } else if (msg instanceof UserMessage) {
                 // Convert easyagent4j UserMessage to Spring AI UserMessage
                 UserMessage userMsg = (UserMessage) msg;

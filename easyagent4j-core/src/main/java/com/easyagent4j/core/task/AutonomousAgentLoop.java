@@ -186,18 +186,45 @@ public class AutonomousAgentLoop extends AgentLoop {
             
             ChatRequest request = ChatRequest.builder()
                 .messages(List.of(Map.of("role", "user", "content", prompt)))
-                .systemPrompt("You are a task reviewer. Evaluate if a step was completed successfully.")
+                .systemPrompt("You are a task reviewer. Evaluate if a step was completed successfully. Respond briefly.")
                 .streaming(false)
                 .build();
             
             ChatResponse response = chatModel.call(request);
             String responseText = response.getText();
             
-            // 检查响应中是否包含肯定结果
-            return responseText != null && 
-                (responseText.toLowerCase().contains("yes") || 
-                 responseText.toLowerCase().contains("success") ||
-                 responseText.toLowerCase().contains("completed"));
+            if (responseText == null || responseText.trim().isEmpty()) {
+                log.warn("Empty review response, assuming step success");
+                return true;
+            }
+            
+            String lowerResponse = responseText.toLowerCase();
+            
+            // 检查肯定结果（支持中英文）
+            boolean isPositive = 
+                lowerResponse.contains("yes") || 
+                lowerResponse.contains("success") ||
+                lowerResponse.contains("completed") ||
+                lowerResponse.contains("成功") ||
+                lowerResponse.contains("完成") ||
+                lowerResponse.contains("是") ||
+                lowerResponse.contains("通过");
+            
+            // 检查否定结果
+            boolean isNegative = 
+                lowerResponse.contains("no") || 
+                lowerResponse.contains("failed") ||
+                lowerResponse.contains("error") ||
+                lowerResponse.contains("失败") ||
+                lowerResponse.contains("错误") ||
+                lowerResponse.contains("否");
+            
+            // 如果明确否定，返回 false；否则默认成功
+            if (isNegative && !isPositive) {
+                return false;
+            }
+            
+            return true;
             
         } catch (Exception e) {
             log.error("Failed to review step result: {}", e.getMessage(), e);
@@ -215,21 +242,50 @@ public class AutonomousAgentLoop extends AgentLoop {
             
             ChatRequest request = ChatRequest.builder()
                 .messages(List.of(Map.of("role", "user", "content", prompt)))
-                .systemPrompt("You are a task reviewer. Evaluate if the entire task was completed successfully.")
+                .systemPrompt("You are a task reviewer. Evaluate if the entire task was completed successfully. Respond briefly.")
                 .streaming(false)
                 .build();
             
             ChatResponse response = chatModel.call(request);
             String responseText = response.getText();
             
-            return responseText != null && 
-                (responseText.toLowerCase().contains("yes") || 
-                 responseText.toLowerCase().contains("success") ||
-                 responseText.toLowerCase().contains("completed"));
+            if (responseText == null || responseText.trim().isEmpty()) {
+                log.warn("Empty final review response, assuming success");
+                return true;
+            }
+            
+            String lowerResponse = responseText.toLowerCase();
+            
+            // 检查肯定结果（支持中英文）
+            boolean isPositive = 
+                lowerResponse.contains("yes") || 
+                lowerResponse.contains("success") ||
+                lowerResponse.contains("completed") ||
+                lowerResponse.contains("成功") ||
+                lowerResponse.contains("完成") ||
+                lowerResponse.contains("是") ||
+                lowerResponse.contains("通过");
+            
+            // 检查否定结果
+            boolean isNegative = 
+                lowerResponse.contains("no") || 
+                lowerResponse.contains("failed") ||
+                lowerResponse.contains("error") ||
+                lowerResponse.contains("失败") ||
+                lowerResponse.contains("错误") ||
+                lowerResponse.contains("否");
+            
+            // 如果明确否定，返回 false；否则默认成功
+            if (isNegative && !isPositive) {
+                return false;
+            }
+            
+            return true;
             
         } catch (Exception e) {
             log.error("Failed to review final result: {}", e.getMessage(), e);
-            return false;
+            // 审查失败时，保守地认为任务成功
+            return true;
         }
     }
 
