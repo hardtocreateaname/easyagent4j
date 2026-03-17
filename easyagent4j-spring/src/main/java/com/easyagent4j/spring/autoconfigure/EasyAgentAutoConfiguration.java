@@ -22,11 +22,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import com.easyagent4j.core.event.AgentEventListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.nio.file.Paths;
+import java.util.Optional;
 
 /**
  * EasyAgent4j auto configuration.
@@ -73,7 +75,23 @@ public class EasyAgentAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ChatModel.class)
-    public ChatModel easyAgentChatModel(org.springframework.ai.chat.model.ChatModel springChatModel) {
+    public ChatModel easyAgentChatModel(java.util.Map<String, org.springframework.ai.chat.model.ChatModel> chatModels,
+                                         EasyAgentProperties props) {
+        String provider = props.getChatProvider().toLowerCase();
+        String beanName = switch (provider) {
+            case "zhipuai", "zhipu" -> "zhiPuAiChatModel";
+            case "openai" -> "openAiChatModel";
+            default -> "openAiChatModel";
+        };
+
+        org.springframework.ai.chat.model.ChatModel springChatModel = chatModels.get(beanName);
+        if (springChatModel == null) {
+            // Fallback to first available
+            springChatModel = chatModels.values().iterator().next();
+            log.warn("Requested chat model '{}' not found, using first available", beanName);
+        }
+
+        log.info("Using chat model: {}", beanName);
         return new SpringAiChatModelAdapter(springChatModel);
     }
 
@@ -115,19 +133,19 @@ public class EasyAgentAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(Agent.class)
     public Agent agent(AgentConfig config, ChatModel chatModel,
-                        MemoryStore memoryStore, AgentPersonality agentPersonality) {
+                        Optional<MemoryStore> memoryStore, Optional<AgentPersonality> agentPersonality) {
         Agent agent = new Agent(config, chatModel);
 
         // 注入memory store
-        if (config.getMemory() != null && config.getMemory().isEnabled() && memoryStore != null) {
-            agent.setMemoryStore(memoryStore);
+        if (config.getMemory() != null && config.getMemory().isEnabled() && memoryStore.isPresent()) {
+            agent.setMemoryStore(memoryStore.get());
             log.info("MemoryStore configured for agent");
         }
 
         // 注入personality
-        if (config.getPersonality() != null && agentPersonality != null) {
-            agent.setPersonality(agentPersonality);
-            log.info("AgentPersonality configured for agent: {}", agentPersonality.getName());
+        if (config.getPersonality() != null && agentPersonality.isPresent()) {
+            agent.setPersonality(agentPersonality.get());
+            log.info("AgentPersonality configured for agent: {}", agentPersonality.get().getName());
         }
 
         return agent;

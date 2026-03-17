@@ -9,6 +9,7 @@ public class EasyAgentProperties {
     private int maxToolIterations = 10;
     private ToolExecutionMode toolExecutionMode = ToolExecutionMode.PARALLEL;
     private boolean streaming = true;
+    private String chatProvider = "openai"; // openai or zhipuai
     private ContextProperties context = new ContextProperties();
     private MemoryProperties memory = new MemoryProperties();
     private PersonalityProperties personality = new PersonalityProperties();
@@ -22,6 +23,8 @@ public class EasyAgentProperties {
     public void setToolExecutionMode(ToolExecutionMode toolExecutionMode) { this.toolExecutionMode = toolExecutionMode; }
     public boolean isStreaming() { return streaming; }
     public void setStreaming(boolean streaming) { this.streaming = streaming; }
+    public String getChatProvider() { return chatProvider; }
+    public void setChatProvider(String chatProvider) { this.chatProvider = chatProvider; }
     public ContextProperties getContext() { return context; }
     public void setContext(ContextProperties context) { this.context = context; }
     public MemoryProperties getMemory() { return memory; }
