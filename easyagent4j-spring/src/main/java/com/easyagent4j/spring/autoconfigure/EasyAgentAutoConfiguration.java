@@ -5,18 +5,28 @@ import com.easyagent4j.core.agent.AgentConfig;
 import com.easyagent4j.core.chat.ChatModel;
 import com.easyagent4j.core.context.MessageTransformer;
 import com.easyagent4j.core.context.transform.SlidingWindowTransformer;
+import com.easyagent4j.core.memory.FileMemoryStore;
+import com.easyagent4j.core.memory.MemoryStore;
+import com.easyagent4j.core.personality.AgentPersonality;
+import com.easyagent4j.core.personality.PersonalityLoader;
+import com.easyagent4j.core.resilience.RetryPolicy;
 import com.easyagent4j.core.tool.ToolExecutionMode;
 import com.easyagent4j.spring.chat.SpringAiChatModelAdapter;
 import com.easyagent4j.spring.observability.AgentMetrics;
 import com.easyagent4j.spring.observability.DefaultAgentMetrics;
 import com.easyagent4j.spring.observability.MetricsEventListener;
 import com.easyagent4j.spring.properties.EasyAgentProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import com.easyagent4j.core.event.AgentEventListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.nio.file.Paths;
 
 /**
  * EasyAgent4j auto configuration.
@@ -25,17 +35,40 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnClass(Agent.class)
 @EnableConfigurationProperties(EasyAgentProperties.class)
 public class EasyAgentAutoConfiguration {
+    private static final Logger log = LoggerFactory.getLogger(EasyAgentAutoConfiguration.class);
 
     @Bean
     @ConditionalOnMissingBean
     public AgentConfig easyAgentConfig(EasyAgentProperties props) {
         ToolExecutionMode mode = props.getToolExecutionMode();
-        return AgentConfig.builder()
+        AgentConfig.Builder builder = AgentConfig.builder()
             .systemPrompt(props.getSystemPrompt())
             .maxToolIterations(props.getMaxToolIterations())
             .toolExecutionMode(mode != null ? mode : ToolExecutionMode.PARALLEL)
             .streamingEnabled(props.isStreaming())
-            .build();
+            .autonomousMode(props.isAutonomousMode());
+
+        // 添加memory配置
+        if (props.getMemory().isEnabled()) {
+            builder.memory(new AgentConfig.MemoryConfig(
+                props.getMemory().getBasePath(),
+                props.getMemory().isEnabled(),
+                props.getMemory().isAutoConsolidate()
+            ));
+        }
+
+        // 添加personality配置
+        if (props.getPersonality().getPersonalityPath() != null) {
+            builder.personality(new AgentConfig.PersonalityConfig(
+                props.getPersonality().getName(),
+                props.getPersonality().getPersonalityPath()
+            ));
+        }
+
+        // 添加retry policy配置
+        builder.retryPolicy(new RetryPolicy());
+
+        return builder.build();
     }
 
     @Bean
@@ -55,9 +88,49 @@ public class EasyAgentAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "easyagent.memory", name = "enabled", havingValue = "true")
+    public MemoryStore memoryStore(EasyAgentProperties props) {
+        String basePath = props.getMemory().getBasePath();
+        String sessionId = props.getSystemPrompt() != null ? 
+            String.valueOf(props.getSystemPrompt().hashCode()) : "default";
+        return new FileMemoryStore(basePath, sessionId);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "easyagent.personality", name = "personalityPath")
+    public AgentPersonality agentPersonality(EasyAgentProperties props) {
+        try {
+            String path = props.getPersonality().getPersonalityPath();
+            AgentPersonality personality = PersonalityLoader.load(Paths.get(path));
+            log.info("Loaded personality from: {}", path);
+            return personality;
+        } catch (Exception e) {
+            log.error("Failed to load personality from: {}", props.getPersonality().getPersonalityPath(), e);
+            throw new RuntimeException("Failed to load personality", e);
+        }
+    }
+
+    @Bean
     @ConditionalOnMissingBean(Agent.class)
-    public Agent agent(AgentConfig config, ChatModel chatModel) {
-        return new Agent(config, chatModel);
+    public Agent agent(AgentConfig config, ChatModel chatModel,
+                        MemoryStore memoryStore, AgentPersonality agentPersonality) {
+        Agent agent = new Agent(config, chatModel);
+
+        // 注入memory store
+        if (config.getMemory() != null && config.getMemory().isEnabled() && memoryStore != null) {
+            agent.setMemoryStore(memoryStore);
+            log.info("MemoryStore configured for agent");
+        }
+
+        // 注入personality
+        if (config.getPersonality() != null && agentPersonality != null) {
+            agent.setPersonality(agentPersonality);
+            log.info("AgentPersonality configured for agent: {}", agentPersonality.getName());
+        }
+
+        return agent;
     }
 
     /**

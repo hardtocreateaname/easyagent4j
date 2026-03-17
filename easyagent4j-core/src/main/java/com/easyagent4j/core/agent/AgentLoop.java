@@ -11,10 +11,12 @@ import com.easyagent4j.core.event.AgentEventPublisher;
 import com.easyagent4j.core.event.events.*;
 import com.easyagent4j.core.exception.*;
 import com.easyagent4j.core.message.*;
+import com.easyagent4j.core.resilience.RetryPolicy;
 import com.easyagent4j.core.tool.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +37,7 @@ import java.util.function.Consumer;
  * 支持：
  * - 串行/并行工具执行（由ToolExecutionMode控制）
  * - 转向机制（通过AgentSteering动态改变执行方向）
+ * - 重试策略（通过RetryPolicy实现失败重试）
  */
 public class AgentLoop {
     private static final Logger log = LoggerFactory.getLogger(AgentLoop.class);
@@ -47,6 +50,7 @@ public class AgentLoop {
     private final ToolHook toolHook;
     private final AgentEventPublisher eventPublisher;
     private final AgentSteering steering;
+    private final RetryPolicy retryPolicy;
     private volatile boolean aborted = false;
 
     private final Map<String, AgentTool> toolMap = new ConcurrentHashMap<>();
@@ -59,13 +63,20 @@ public class AgentLoop {
     public AgentLoop(ChatModel chatModel, AgentConfig config, List<AgentTool> tools,
                      MessageTransformer transformer, MessageConverter converter,
                      ToolHook toolHook, AgentEventPublisher eventPublisher) {
-        this(chatModel, config, tools, transformer, converter, toolHook, eventPublisher, null);
+        this(chatModel, config, tools, transformer, converter, toolHook, eventPublisher, null, null);
     }
 
     public AgentLoop(ChatModel chatModel, AgentConfig config, List<AgentTool> tools,
                      MessageTransformer transformer, MessageConverter converter,
                      ToolHook toolHook, AgentEventPublisher eventPublisher,
                      AgentSteering steering) {
+        this(chatModel, config, tools, transformer, converter, toolHook, eventPublisher, steering, null);
+    }
+
+    public AgentLoop(ChatModel chatModel, AgentConfig config, List<AgentTool> tools,
+                     MessageTransformer transformer, MessageConverter converter,
+                     ToolHook toolHook, AgentEventPublisher eventPublisher,
+                     AgentSteering steering, RetryPolicy retryPolicy) {
         this.chatModel = chatModel;
         this.config = config;
         this.tools = new CopyOnWriteArrayList<>(tools != null ? tools : List.of());
@@ -74,6 +85,7 @@ public class AgentLoop {
         this.toolHook = toolHook;
         this.eventPublisher = eventPublisher;
         this.steering = steering;
+        this.retryPolicy = retryPolicy != null ? retryPolicy : new RetryPolicy();
 
         for (AgentTool tool : this.tools) {
             toolMap.put(tool.getName(), tool);
@@ -273,6 +285,7 @@ public class AgentLoop {
     /**
      * 执行单个工具调用（含hook支持和事件发布）。
      * 并行安全：每个工具调用独立执行。
+     * 支持重试策略。
      */
     private ToolResultMessage executeSingleTool(ToolCall call, AgentContext context) {
         eventPublisher.publish(new ToolExecutionStartEvent(context, call));
@@ -295,27 +308,54 @@ public class AgentLoop {
             return msg;
         }
 
-        // 执行工具
-        try {
-            ToolContext tc = new ToolContext(call, context);
-            ToolResult result = tool.execute(tc);
+        // 执行工具（带重试）
+        int retryCount = 0;
+        Exception lastException = null;
 
-            if (toolHook != null) {
-                toolHook.afterToolCall(call, result, false, context);
+        while (retryCount <= retryPolicy.getMaxRetries()) {
+            try {
+                ToolContext tc = new ToolContext(call, context);
+                ToolResult result = tool.execute(tc);
+
+                if (toolHook != null) {
+                    toolHook.afterToolCall(call, result, false, context);
+                }
+
+                ToolResultMessage msg = ToolResultMessage.success(call, result.getContent());
+                eventPublisher.publish(new ToolExecutionEndEvent(context, call, false));
+                return msg;
+            } catch (Exception e) {
+                lastException = e;
+                log.error("Tool execution error (attempt {}): {}", retryCount + 1, call.getName(), e);
+
+                retryCount++;
+
+                // 检查是否可以重试
+                if (retryCount <= retryPolicy.getMaxRetries()) {
+                    try {
+                        Duration delay = retryPolicy.getNextDelay(retryCount);
+                        log.info("Retrying tool {} after {}ms", call.getName(), delay.toMillis());
+                        Thread.sleep(delay.toMillis());
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        ToolResultMessage msg = ToolResultMessage.error(call, "Tool execution interrupted: " + ie.getMessage());
+                        eventPublisher.publish(new ToolExecutionEndEvent(context, call, true));
+                        return msg;
+                    }
+                }
             }
-
-            ToolResultMessage msg = ToolResultMessage.success(call, result.getContent());
-            eventPublisher.publish(new ToolExecutionEndEvent(context, call, false));
-            return msg;
-        } catch (Exception e) {
-            log.error("Tool execution error: {}", call.getName(), e);
-            ToolResultMessage msg = ToolResultMessage.error(call, e.getMessage());
-
-            if (toolHook != null) {
-                toolHook.afterToolCall(call, ToolResult.error(e.getMessage()), true, context);
-            }
-            eventPublisher.publish(new ToolExecutionEndEvent(context, call, true));
-            return msg;
         }
+
+        // 所有重试都失败
+        log.error("Tool {} failed after {} retries", call.getName(), retryPolicy.getMaxRetries());
+        ToolResultMessage msg = ToolResultMessage.error(call,
+            "Tool execution failed after " + retryPolicy.getMaxRetries() + " retries: " +
+            (lastException != null ? lastException.getMessage() : "Unknown error"));
+
+        if (toolHook != null) {
+            toolHook.afterToolCall(call, ToolResult.error(msg.getResultContent()), true, context);
+        }
+        eventPublisher.publish(new ToolExecutionEndEvent(context, call, true));
+        return msg;
     }
 }

@@ -11,9 +11,16 @@ import com.easyagent4j.core.event.AgentEventPublisher;
 import com.easyagent4j.core.event.events.AgentEndEvent;
 import com.easyagent4j.core.event.events.AgentStartEvent;
 import com.easyagent4j.core.exception.AgentAbortException;
+import com.easyagent4j.core.memory.MemoryPromptBuilder;
+import com.easyagent4j.core.memory.MemoryStore;
 import com.easyagent4j.core.message.AgentMessage;
 import com.easyagent4j.core.message.ContentPart;
 import com.easyagent4j.core.message.UserMessage;
+import com.easyagent4j.core.personality.AgentPersonality;
+import com.easyagent4j.core.resilience.RetryPolicy;
+import com.easyagent4j.core.task.AutonomousAgentLoop;
+import com.easyagent4j.core.task.DefaultTaskPlanner;
+import com.easyagent4j.core.task.TaskPlanner;
 import com.easyagent4j.core.tool.AgentTool;
 import com.easyagent4j.core.tool.ToolHook;
 import org.slf4j.Logger;
@@ -44,6 +51,8 @@ public class Agent {
     private final AgentSteering steering;
     private AgentLoop loop;
     private volatile AgentState state = AgentState.IDLE;
+    private MemoryStore memoryStore;
+    private AgentPersonality personality;
 
     public Agent(AgentConfig config, ChatModel chatModel) {
         this.config = config;
@@ -58,7 +67,7 @@ public class Agent {
     }
 
     private AgentLoop createLoop() {
-        return new AgentLoop(chatModel, config, tools, transformer, converter, toolHook, eventPublisher, steering);
+        return new AgentLoop(chatModel, config, tools, transformer, converter, toolHook, eventPublisher, steering, config.getRetryPolicy());
     }
 
     // === 核心方法 ===
@@ -81,6 +90,8 @@ public class Agent {
             state = AgentState.RUNNING;
             eventPublisher.publish(new AgentStartEvent(context));
             try {
+                // 如果配置了personality，增强system prompt
+                enhanceSystemPromptIfConfigured();
                 loop = createLoop();
                 return loop.execute(message, context);
             } finally {
@@ -100,6 +111,8 @@ public class Agent {
             state = AgentState.RUNNING;
             eventPublisher.publish(new AgentStartEvent(context));
             try {
+                // 如果配置了personality，增强system prompt
+                enhanceSystemPromptIfConfigured();
                 loop = createLoop();
                 return loop.execute(null, context);
             } finally {
@@ -107,6 +120,61 @@ public class Agent {
                 eventPublisher.publish(new AgentEndEvent(context));
             }
         });
+    }
+
+    /**
+     * 执行自主任务。
+     *
+     * @param goal 任务目标
+     * @return 执行完成的上下文
+     */
+    public CompletableFuture<AgentContext> executeAutonomous(String goal) {
+        if (state == AgentState.RUNNING) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Agent is already running"));
+        }
+
+        return CompletableFuture.supplyAsync(() -> {
+            state = AgentState.RUNNING;
+            eventPublisher.publish(new AgentStartEvent(context));
+            try {
+                // 如果配置了personality，增强system prompt
+                enhanceSystemPromptIfConfigured();
+
+                // 创建自主循环
+                TaskPlanner taskPlanner = new DefaultTaskPlanner(chatModel);
+                RetryPolicy retryPolicy = config.getRetryPolicy() != null ? config.getRetryPolicy() : new RetryPolicy();
+                AutonomousAgentLoop autonomousLoop = new AutonomousAgentLoop(
+                    chatModel, config, tools, transformer, converter, toolHook,
+                    eventPublisher, taskPlanner, retryPolicy
+                );
+
+                return autonomousLoop.executeAutonomous(goal);
+            } finally {
+                state = AgentState.IDLE;
+                eventPublisher.publish(new AgentEndEvent(context));
+            }
+        });
+    }
+
+    /**
+     * 如果配置了personality，增强system prompt。
+     */
+    private void enhanceSystemPromptIfConfigured() {
+        if (personality != null) {
+            String personalityPrompt = personality.buildSystemPrompt();
+            String currentPrompt = config.getSystemPrompt();
+            String enhancedPrompt = personalityPrompt + "\n\n" + currentPrompt;
+            config.applySystemPromptOverride(enhancedPrompt);
+        }
+
+        if (memoryStore != null && config.getMemory() != null && config.getMemory().isEnabled()) {
+            MemoryPromptBuilder promptBuilder = new MemoryPromptBuilder();
+            String memoryEnhancedPrompt = promptBuilder.buildEnhancedSystemPrompt(
+                config.getSystemPrompt(), memoryStore
+            );
+            config.applySystemPromptOverride(memoryEnhancedPrompt);
+        }
     }
 
     /**
@@ -180,6 +248,34 @@ public class Agent {
         context.clearMessages();
         context.getAttributes().clear();
         steering.clear();
+    }
+
+    /**
+     * 设置记忆存储。
+     */
+    public void setMemoryStore(MemoryStore memoryStore) {
+        this.memoryStore = memoryStore;
+    }
+
+    /**
+     * 设置Agent性格。
+     */
+    public void setPersonality(AgentPersonality personality) {
+        this.personality = personality;
+    }
+
+    /**
+     * 获取记忆存储。
+     */
+    public MemoryStore getMemory() {
+        return memoryStore;
+    }
+
+    /**
+     * 获取Agent性格。
+     */
+    public AgentPersonality getPersonality() {
+        return personality;
     }
 
     // === 查询 ===
