@@ -1,0 +1,21 @@
+# EasyAgent4j 基础对话示例配置
+easyagent:
+  system-prompt: "你是一个友好的AI助手，请用中文回答。"
+  max-tool-iterations: 5
+  streaming: true
+  context:
+    max-messages: 50
+
+spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:your-api-key}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      chat:
+        options:
+          model: ${OPENAI_MODEL:gpt-4o-mini}
+          temperature: 0.7
+
+logging:
+  level:
+    com.easyagent4j: DEBUG

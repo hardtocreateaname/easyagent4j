@@ -1,0 +1,13 @@
+easyagent:
+  system-prompt: "你是EasyAgent4j的示例助手。你可以查询天气、进行数学计算和读取文件。请用中文回答。"
+  max-tool-iterations: 10
+  tool-execution-mode: sequential
+  streaming: true
+  context:
+    max-messages: 50
+
+spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:your-api-key}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
