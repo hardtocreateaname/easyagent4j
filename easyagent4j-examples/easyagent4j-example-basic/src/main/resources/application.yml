@@ -3,11 +3,15 @@ easyagent:
   system-prompt: "你是一个友好的AI助手，请用中文回答。"
   max-tool-iterations: 5
   streaming: true
+  chat-provider: openai
   context:
     max-messages: 50
 
 spring:
   ai:
+    # 指定使用openai模型
+    model:
+      chat: openai
     openai:
       api-key: ${OPENAI_API_KEY:your-api-key}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}

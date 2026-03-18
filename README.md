@@ -4,24 +4,27 @@
 
 [![Java 17+](https://img.shields.io/badge/Java-17+-green.svg)](https://openjdk.org/projects/jdk/17/)
 [![Spring Boot 3.3](https://img.shields.io/badge/Spring%20Boot-3.3.6-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Spring AI 1.1](https://img.shields.io/badge/Spring%20AI-1.1.2-blue.svg)](https://spring.io/projects/spring-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
 ## Overview
 
-EasyAgent4j is a Java framework for building AI agents with multi-turn conversations, tool calling, memory, personality, and autonomous task execution. Inspired by [OpenClaw](https://github.com/zhilei/openclaw), it provides a clean abstraction layer over LLM APIs with Spring Boot integration, enabling developers to focus on business logic rather than API complexity.
+EasyAgent4j is a Java framework for building AI agents with multi-turn conversations, tool calling, memory, personality, and autonomous task execution. Inspired by [OpenClaw](https://github.com/zhilei/openclaw), it provides a clean abstraction layer over LLM APIs with Spring Boot and Spring AI integration, enabling developers to focus on business logic rather than API complexity.
 
 ## Features
 
-- **Multi-Model Provider Architecture** — Support for OpenAI, Anthropic Claude, Zhipu GLM, and MiniMax with runtime switching
+- **Dual Provider Architecture** — Choose between HTTP implementation or Spring AI integration for each LLM provider
+- **Multi-Model Support** — OpenAI, Anthropic Claude, Zhipu GLM, and MiniMax with runtime switching
+- **Spring AI Integration** — Seamless integration with Spring AI starters (`spring-ai-starter-model-*`)
 - **Agent Loop** — Autonomous execution with automatic tool calling, parallel/sequential execution modes, and iterative refinement
 - **Tool System** — Define tools via interface or annotations with built-in support for parallel execution and result aggregation
 - **Memory System** — File-based persistent memory (long-term, short-term, user preferences) with automatic consolidation and prompt injection
 - **Personality System** — Configure agent personality (name, role, tone, style, boundaries) via JSON or Markdown (SOUL.md format)
 - **Task Planning** — LLM-driven autonomous task decomposition, execution, and review with automatic replanning
 - **Event-Driven Architecture** — Complete lifecycle events (start/end/tool/message/turn) for observability and custom hooks
-- **Streaming Output** — SSE-based streaming responses for real-time interaction
+- **Streaming Output** — SSE-based streaming responses for real-time interaction with delta calculation
 - **Observability** — Built-in metrics collection with Micrometer/Prometheus integration support
 - **Retry Policy** — Exponential backoff retry mechanism for resilient tool execution
 - **Spring Boot Integration** — Auto-configuration with starter, property-based configuration, and seamless ChatModel adaptation
@@ -92,15 +95,59 @@ EasyAgent4j is a Java framework for building AI agents with multi-turn conversat
     <version>0.3.0-SNAPSHOT</version>
 </dependency>
 
-<!-- Add provider(s) as needed -->
+<!-- Choose your provider implementation -->
+
+<!-- Option A: Spring AI Integration (Recommended) -->
 <dependency>
     <groupId>com.easyagent4j</groupId>
-    <artifactId>easyagent4j-provider-openai</artifactId>
+    <artifactId>provider-springai-zhipu</artifactId>
+    <version>0.3.0-SNAPSHOT</version>
+</dependency>
+
+<!-- Option B: HTTP Implementation -->
+<dependency>
+    <groupId>com.easyagent4j</groupId>
+    <artifactId>provider-http-zhipu</artifactId>
     <version>0.3.0-SNAPSHOT</version>
 </dependency>
 ```
 
 ### 2. Configure
+
+**Spring AI Integration:**
+
+```yaml
+spring:
+  ai:
+    model:
+      chat: zhipuai  # Required for Spring AI auto-configuration
+    zhipuai:
+      api-key: ${ZHIPU_API_KEY}
+      chat:
+        options:
+          model: glm-4
+
+easyagent:
+  system-prompt: "You are a helpful assistant."
+  max-tool-iterations: 10
+  tool-execution-mode: PARALLEL  # PARALLEL | SEQUENTIAL
+  streaming: true
+  autonomous-mode: false
+  chat-provider: zhipu
+  
+  # Memory system
+  memory:
+    enabled: true
+    base-path: ./agent-memory
+    auto-consolidate: false
+  
+  # Personality
+  personality:
+    name: "Assistant"
+    personality-path: classpath:personality.md
+```
+
+**HTTP Implementation:**
 
 ```yaml
 easyagent:
@@ -109,31 +156,16 @@ easyagent:
   tool-execution-mode: PARALLEL  # PARALLEL | SEQUENTIAL
   streaming: true
   autonomous-mode: false
+  chat-provider: zhipu
   
-  # Multi-model provider configuration
-  chat-provider: openai  # Default provider
   provider:
-    openai:
-      enabled: true
-      base-url: https://api.openai.com
-      api-key: ${OPENAI_API_KEY}
-      model: gpt-4o
-      max-tokens: 4096
-      temperature: 0.7
-    anthropic:
-      enabled: false
-      base-url: https://api.anthropic.com
-      api-key: ${ANTHROPIC_API_KEY}
-      model: claude-sonnet-4-20250514
     zhipu:
-      enabled: false
+      enabled: true
       base-url: https://open.bigmodel.cn/api/paas/v4
       api-key: ${ZHIPU_API_KEY}
       model: glm-4
-    minimax:
-      enabled: false
-      api-key: ${MINIMAX_API_KEY}
-      model: abab6.5s-chat
+      max-tokens: 4096
+      temperature: 0.7
   
   # Memory system
   memory:
@@ -201,16 +233,78 @@ public class ChatController {
 
 ## Multi-Model Provider Configuration
 
-EasyAgent4j supports multiple LLM providers through a unified abstraction layer. Enable providers as needed and switch between them at runtime.
+EasyAgent4j supports multiple LLM providers with **dual implementation options**:
+
+1. **HTTP Implementation** (`provider-http-*`) — Direct HTTP API calls, lightweight with no Spring AI dependency
+2. **Spring AI Integration** (`provider-springai-*`) — Leverages Spring AI starters for managed configuration and features
 
 ### Provider Modules
 
-| Provider | Module | Supported Models | Compatibility |
-|----------|--------|------------------|---------------|
-| **OpenAI** | `easyagent4j-provider-openai` | GPT-4o, GPT-4, GPT-3.5 | OpenAI API format (compatible with DeepSeek, Qwen, Moonshot, etc.) |
-| **Anthropic** | `easyagent4j-provider-anthropic` | Claude 3.5 Sonnet, Claude 3 Opus | Anthropic Messages API |
-| **Zhipu GLM** | `easyagent4j-provider-zhipu` | GLM-4, GLM-3 | OpenAI-compatible API |
-| **MiniMax** | `easyagent4j-provider-minimax` | abab6.5s, abab6.5 | MiniMax Chat API |
+| Provider | HTTP Module | Spring AI Module | Supported Models |
+|----------|-------------|------------------|------------------|
+| **OpenAI** | `provider-http-openai` | `provider-springai-openai` | GPT-4o, GPT-4, GPT-3.5 (also DeepSeek, Qwen, Moonshot) |
+| **Anthropic** | `provider-http-anthropic` | `provider-springai-anthropic` | Claude 3.5 Sonnet, Claude 3 Opus |
+| **Zhipu GLM** | `provider-http-zhipu` | `provider-springai-zhipu` | GLM-4, GLM-3 |
+| **MiniMax** | `provider-http-minimax` | `provider-springai-minimax` | abab6.5s, abab6.5 |
+
+### Choose Your Implementation
+
+**HTTP Implementation** — Best for:
+- Minimal dependencies
+- Custom HTTP configurations
+- Direct API control
+
+**Spring AI Integration** — Best for:
+- Spring AI ecosystem features
+- Managed connection pooling
+- Built-in observability and tracing
+
+### Using Spring AI Integration
+
+```xml
+<!-- Add Spring AI provider -->
+<dependency>
+    <groupId>com.easyagent4j</groupId>
+    <artifactId>provider-springai-zhipu</artifactId>
+    <version>0.3.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    model:
+      chat: zhipuai  # Required for Spring AI auto-configuration
+    zhipuai:
+      api-key: ${ZHIPU_API_KEY}
+      chat:
+        options:
+          model: glm-4
+
+easyagent:
+  chat-provider: zhipu
+```
+
+### Using HTTP Implementation
+
+```xml
+<dependency>
+    <groupId>com.easyagent4j</groupId>
+    <artifactId>provider-http-zhipu</artifactId>
+    <version>0.3.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+easyagent:
+  chat-provider: zhipu
+  provider:
+    zhipu:
+      enabled: true
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      api-key: ${ZHIPU_API_KEY}
+      model: glm-4
+```
 
 ### Runtime Provider Switching
 
@@ -245,7 +339,23 @@ easyagent:
       max-tokens: 4096
       temperature: 0.7
       timeout-seconds: 60
+    anthropic:
+      enabled: false
+      base-url: https://api.anthropic.com
+      api-key: ${ANTHROPIC_API_KEY}
+      model: claude-sonnet-4-20250514
+    zhipu:
+      enabled: false
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      api-key: ${ZHIPU_API_KEY}
+      model: glm-4
+    minimax:
+      enabled: false
+      api-key: ${MINIMAX_API_KEY}
+      model: abab6.5s-chat
 ```
+
+**Note:** The OpenAI provider is compatible with OpenAI-format APIs (DeepSeek, Qwen, Moonshot, etc.). Simply change the `base-url` to the target API endpoint.
 
 ## Core Concepts
 
@@ -409,6 +519,18 @@ public class LoggingEventListener implements AgentEventListener {
 - `TOOL_EXECUTION_START` / `TOOL_EXECUTION_UPDATE` / `TOOL_EXECUTION_END`
 - `ERROR`
 
+**Note:** When subscribing to events, clear previous listeners to avoid duplicate processing:
+
+```java
+// Clear old listeners before subscribing new ones
+agent.clearListeners();
+agent.subscribe(event -> {
+    if (event instanceof MessageUpdateEvent e) {
+        System.out.print(e.getDelta());
+    }
+});
+```
+
 ### Observability
 
 Built-in metrics collection with Micrometer/Prometheus support:
@@ -435,10 +557,10 @@ Metrics collected:
 | Module | Description |
 |--------|-------------|
 | **easyagent4j-core** | Core runtime: Agent, AgentLoop, Provider abstraction, Tools, Events, Memory, Personality, Task planning |
-| **easyagent4j-provider-openai** | OpenAI provider (compatible with OpenAI, DeepSeek, Qwen, Moonshot, etc.) |
-| **easyagent4j-provider-anthropic** | Anthropic Claude provider |
-| **easyagent4j-provider-zhipu** | Zhipu GLM provider |
-| **easyagent4j-provider-minimax** | MiniMax provider |
+| **easyagent4j-providers** | Parent module for all provider implementations |
+| **provider-http-*** | HTTP-based provider implementations (openai, anthropic, zhipu, minimax) |
+| **provider-springai-*** | Spring AI integration providers (openai, anthropic, zhipu, minimax) |
+| **provider-springai-core** | Core adapter for Spring AI ChatModel to LlmProvider interface |
 | **easyagent4j-spring** | Spring integration: AutoConfiguration, ChatModel adaptation, Observability |
 | **easyagent4j-spring-boot-starter** | Spring Boot starter with auto-configuration |
 | **easyagent4j-examples** | Example applications |
@@ -541,6 +663,13 @@ public RetryPolicy customRetryPolicy() {
 ```
 
 ### Streaming with SSE
+
+EasyAgent4j handles both cumulative and incremental streaming modes automatically:
+
+- **Cumulative mode** — Each chunk contains all content from start (e.g., Zhipu GLM)
+- **Incremental mode** — Each chunk contains only new content (e.g., OpenAI)
+
+The framework automatically detects and converts to incremental output.
 
 ```java
 @RestController

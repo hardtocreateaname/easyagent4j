@@ -81,19 +81,25 @@ public class EasyAgentAutoConfiguration {
     public LlmProviderRegistry llmProviderRegistry(java.util.List<LlmProvider> providers, EasyAgentProperties props) {
         LlmProviderRegistry registry = new LlmProviderRegistry();
         
-        // 注册所有可用的Provider
+        // 注册所有可用的Provider（过滤掉null值）
         if (providers != null) {
             for (LlmProvider provider : providers) {
-                registry.register(provider);
-                log.info("Registered LLM provider: {}", provider.getName());
+                if (provider != null) {
+                    registry.register(provider);
+                    log.info("Registered LLM provider: {}", provider.getName());
+                }
             }
         }
         
-        // 设置默认Provider
+        // 设置默认Provider（仅当provider存在时才设置）
         String defaultProvider = props.getChatProvider();
         if (defaultProvider != null && !defaultProvider.isEmpty()) {
-            registry.setDefault(defaultProvider);
-            log.info("Set default LLM provider: {}", defaultProvider);
+            if (registry.get(defaultProvider) != null) {
+                registry.setDefault(defaultProvider);
+                log.info("Set default LLM provider: {}", defaultProvider);
+            } else {
+                log.warn("Requested provider '{}' not found, will use first available provider", defaultProvider);
+            }
         }
         
         return registry;

@@ -35,7 +35,8 @@ public class ToolCallExample implements CommandLineRunner {
         agent.addTool(new CalculatorTool());
         agent.addTool(new FileReadTool());
 
-        // 监听事件
+        // 监听事件 - 先清除旧的监听器，避免重复订阅
+        agent.clearListeners();
         agent.subscribe(event -> {
             if (event instanceof MessageUpdateEvent e) {
                 System.out.print(e.getDelta());

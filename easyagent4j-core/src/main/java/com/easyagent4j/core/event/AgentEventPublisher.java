@@ -15,6 +15,7 @@ public class AgentEventPublisher {
 
     public void subscribe(AgentEventListener listener) {
         listeners.add(listener);
+        log.debug("Listener subscribed, total listeners: {}", listeners.size());
     }
 
     public void unsubscribe(AgentEventListener listener) {
@@ -22,6 +23,9 @@ public class AgentEventPublisher {
     }
 
     public void publish(AgentEvent event) {
+        if (log.isDebugEnabled() && event.getType().equals("message_update")) {
+            log.debug("Publishing {} to {} listeners: {}", event.getType(), listeners.size(), ((com.easyagent4j.core.event.events.MessageUpdateEvent) event).getDelta());
+        }
         for (AgentEventListener listener : listeners) {
             try {
                 listener.onEvent(event);

@@ -289,4 +289,12 @@ public class Agent {
 
     public void subscribe(AgentEventListener listener) { eventPublisher.subscribe(listener); }
     public void unsubscribe(AgentEventListener listener) { eventPublisher.unsubscribe(listener); }
+    
+    /**
+     * 清除所有事件监听器。
+     * <p>
+     * 在需要重新订阅监听器时使用，避免重复订阅导致事件被多次处理。
+     * </p>
+     */
+    public void clearListeners() { eventPublisher.clear(); }
 }

@@ -200,11 +200,14 @@ public class AgentLoop {
     private AssistantMessage callWithStreaming(ChatRequest request, AgentContext context) {
         StringBuilder content = new StringBuilder();
         AssistantMessage message = new AssistantMessage();
+        final java.util.concurrent.atomic.AtomicInteger chunkCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
         eventPublisher.publish(new MessageStartEvent(context, message));
 
         chatModel.stream(request, chunk -> {
-            if (chunk.getText() != null) {
+            if (chunk.getText() != null && !chunk.getText().isEmpty()) {
+                int count = chunkCount.incrementAndGet();
+                log.debug("Stream chunk #{}: [{}]", count, chunk.getText());
                 content.append(chunk.getText());
                 message.setTextContent(content.toString());
                 eventPublisher.publish(new MessageUpdateEvent(context, chunk.getText()));
@@ -214,6 +217,7 @@ public class AgentLoop {
             }
         });
 
+        log.debug("Stream completed, total chunks: {}, total content length: {}", chunkCount.get(), content.length());
         eventPublisher.publish(new MessageEndEvent(context, message));
         return message;
     }

@@ -78,7 +78,8 @@ public class AutonomousAgentExample implements CommandLineRunner {
         System.out.println("任务目标：" + goal);
         System.out.println("\n开始执行...\n");
 
-        // 监听事件
+        // 监听事件 - 先清除旧的监听器，避免重复订阅
+        agent.clearListeners();
         agent.subscribe(event -> {
             if (event instanceof com.easyagent4j.core.event.events.MessageUpdateEvent e) {
                 System.out.print(e.getDelta());

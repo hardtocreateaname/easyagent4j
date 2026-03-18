@@ -20,17 +20,22 @@
             <artifactId>easyagent4j-core</artifactId>
         </dependency>
 
-        <!-- Optional dependencies for providers -->
-        <dependency>
-            <groupId>com.easyagent4j</groupId>
-            <artifactId>easyagent4j-provider-openai</artifactId>
-            <optional>true</optional>
-        </dependency>
-
         <!-- Spring AI - model module (contains ChatModel, Message, etc.) -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-model</artifactId>
+        </dependency>
+
+        <!-- Optional HTTP providers -->
+        <dependency>
+            <groupId>com.easyagent4j</groupId>
+            <artifactId>provider-http-openai</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>com.easyagent4j</groupId>
+            <artifactId>provider-http-zhipu</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <dependency>

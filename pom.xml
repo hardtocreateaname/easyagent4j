@@ -21,10 +21,7 @@
 
     <modules>
         <module>easyagent4j-core</module>
-        <module>easyagent4j-provider-openai</module>
-        <module>easyagent4j-provider-anthropic</module>
-        <module>easyagent4j-provider-zhipu</module>
-        <module>easyagent4j-provider-minimax</module>
+        <module>easyagent4j-providers</module>
         <module>easyagent4j-spring</module>
         <module>easyagent4j-spring-boot-starter</module>
         <module>easyagent4j-examples</module>
@@ -47,32 +44,56 @@
             </dependency>
             <dependency>
                 <groupId>com.easyagent4j</groupId>
-                <artifactId>easyagent4j-provider-openai</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.easyagent4j</groupId>
-                <artifactId>easyagent4j-provider-anthropic</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.easyagent4j</groupId>
-                <artifactId>easyagent4j-provider-zhipu</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.easyagent4j</groupId>
-                <artifactId>easyagent4j-provider-minimax</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.easyagent4j</groupId>
                 <artifactId>easyagent4j-spring</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.easyagent4j</groupId>
                 <artifactId>easyagent4j-spring-boot-starter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            
+            <!-- HTTP Providers (原生HTTP实现，零依赖) -->
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-http-openai</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-http-anthropic</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-http-zhipu</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-http-minimax</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            
+            <!-- Spring AI Providers (基于Spring AI starter) -->
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-springai-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-springai-openai</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-springai-zhipu</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>provider-springai-anthropic</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

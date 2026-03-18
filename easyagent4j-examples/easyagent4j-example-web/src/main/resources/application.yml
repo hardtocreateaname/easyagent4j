@@ -1,16 +1,20 @@
 server:
   port: 8080
 
-easyagent4j:
+easyagent:
   system-prompt: "你是EasyAgent4j Web API示例助手。请用中文回答问题，保持简洁友好。"
   max-tool-iterations: 10
   streaming: true
   tool-execution-mode: parallel
+  chat-provider: openai
   context:
     max-messages: 50
 
 spring:
   ai:
+    # 指定使用openai模型
+    model:
+      chat: openai
     openai:
       api-key: ${OPENAI_API_KEY:sk-placeholder}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
