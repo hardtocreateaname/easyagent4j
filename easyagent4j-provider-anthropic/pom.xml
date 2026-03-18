@@ -10,9 +10,9 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>easyagent4j-spring</artifactId>
-    <name>EasyAgent4j Spring AI Integration</name>
-    <description>Spring AI integration layer</description>
+    <artifactId>easyagent4j-provider-anthropic</artifactId>
+    <name>EasyAgent4j Anthropic Provider</name>
+    <description>Anthropic Claude provider implementation using JDK HttpClient</description>
 
     <dependencies>
         <dependency>
@@ -20,23 +20,16 @@
             <artifactId>easyagent4j-core</artifactId>
         </dependency>
 
-        <!-- Optional dependencies for providers -->
-        <dependency>
-            <groupId>com.easyagent4j</groupId>
-            <artifactId>easyagent4j-provider-openai</artifactId>
-            <optional>true</optional>
-        </dependency>
-
-        <!-- Spring AI - model module (contains ChatModel, Message, etc.) -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-model</artifactId>
-        </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <dependency>

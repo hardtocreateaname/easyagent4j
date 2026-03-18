@@ -1,45 +1,106 @@
 # EasyAgent4j
 
-> 基于 Spring AI 的轻量级 Java Agent 框架 — 让 Java 开发者以最小成本构建有状态、可观测、支持工具调用的 AI Agent 应用。
+> A lightweight Java Agent framework inspired by OpenClaw — Build stateful, observable, tool-enabled AI agents with minimal effort.
 
 [![Java 17+](https://img.shields.io/badge/Java-17+-green.svg)](https://openjdk.org/projects/jdk/17/)
 [![Spring Boot 3.3](https://img.shields.io/badge/Spring%20Boot-3.3.6-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Spring AI 1.1](https://img.shields.io/badge/Spring%20AI-1.1.2-blue.svg)](https://spring.io/projects/spring-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## ✨ 特性
+## Overview
 
-- 🤖 **有状态 Agent 运行时** — 内置会话管理、消息历史维护、多轮对话支持
-- 🔧 **灵活的工具系统** — 支持 Function Calling，可通过接口或注解定义工具，支持并行/串行执行
-- 📡 **事件驱动架构** — 完整的 Agent 生命周期事件（start/end/tool/message/turn），可插拔的事件监听器
-- 🔀 **流式输出** — 支持 SSE 流式响应，实时返回 LLM 生成内容
-- 🛡️ **Steering 机制** — 运行时动态注入系统提示词，引导 Agent 行为方向
-- 📊 **可观测性** — 内置指标采集接口，零依赖默认实现，可无缝接入 Micrometer/Prometheus
-- 🎯 **注解式工具定义** — 使用 `@AgentTool` 注解快速将 Spring Bean 方法暴露为 Agent 工具
-- 🧠 **上下文管理** — 可插拔的消息转换器，支持滑动窗口、Token 预算等策略
-- 🚀 **Spring Boot Starter** — 开箱即用的自动配置，引入依赖即可使用
-- 🧠 **记忆系统** — 基于 Markdown 文件的持久化记忆，支持长期记忆/短期记忆/用户偏好，MemoryPromptBuilder 自动将记忆注入 system prompt
-- 🎭 **性格系统** — 可配置 Agent 性格（名称/角色/语气/风格/边界），支持 JSON 和 Markdown 双格式定义，灵感来自 OpenClaw 的 SOUL.md
-- 🔄 **自主任务循环** — LLM 驱动的任务规划与执行，支持自动 replan 和审查机制
-- 🔁 **容错重试** — 内置 RetryPolicy（指数退避），工具失败自动重试
+EasyAgent4j is a Java framework for building AI agents with multi-turn conversations, tool calling, memory, personality, and autonomous task execution. Inspired by [OpenClaw](https://github.com/zhilei/openclaw), it provides a clean abstraction layer over LLM APIs with Spring Boot integration, enabling developers to focus on business logic rather than API complexity.
 
-## 🚀 快速开始
+## Features
 
-### 1. 引入依赖
+- **Multi-Model Provider Architecture** — Support for OpenAI, Anthropic Claude, Zhipu GLM, and MiniMax with runtime switching
+- **Agent Loop** — Autonomous execution with automatic tool calling, parallel/sequential execution modes, and iterative refinement
+- **Tool System** — Define tools via interface or annotations with built-in support for parallel execution and result aggregation
+- **Memory System** — File-based persistent memory (long-term, short-term, user preferences) with automatic consolidation and prompt injection
+- **Personality System** — Configure agent personality (name, role, tone, style, boundaries) via JSON or Markdown (SOUL.md format)
+- **Task Planning** — LLM-driven autonomous task decomposition, execution, and review with automatic replanning
+- **Event-Driven Architecture** — Complete lifecycle events (start/end/tool/message/turn) for observability and custom hooks
+- **Streaming Output** — SSE-based streaming responses for real-time interaction
+- **Observability** — Built-in metrics collection with Micrometer/Prometheus integration support
+- **Retry Policy** — Exponential backoff retry mechanism for resilient tool execution
+- **Spring Boot Integration** — Auto-configuration with starter, property-based configuration, and seamless ChatModel adaptation
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Application Layer                         │
+│                                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────┐                  │
+│  │ REST API │  │WebSocket │  │ Message Queue │                  │
+│  └────┬─────┘  └────┬─────┘  └───────┬───────┘                  │
+│       └──────────────┼───────────────────┘                      │
+│                      ▼                                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                      Agent (Core)                        │   │
+│  │  ┌─────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │   │
+│  │  │AgentLoop│  │AgentState│  │ Steering │  │RetryPolicy│ │   │
+│  │  └────┬────┘  └──────────┘  └──────────┘  └──────────┘ │   │
+│  │       ▼                                                     │   │
+│  │  ┌─────────────────────────────────────────────────────┐   │   │
+│  │  │                 AgentContext                        │   │   │
+│  │  │      Messages + Attributes + SessionId              │   │   │
+│  │  └─────────────────────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                      │                                            │
+│       ┌──────────────┼──────────────┐                             │
+│       ▼              ▼              ▼                             │
+│  ┌─────────┐  ┌──────────┐  ┌──────────────┐                     │
+│  │ChatModel│  │  Tools   │  │EventPublisher│                     │
+│  └────┬────┘  └──────────┘  └──────┬───────┘                     │
+│       ▼                            ▼                              │
+│  ┌──────────────────────┐  ┌─────────────────┐                   │
+│  │ LlmProviderRegistry  │  │ EventListeners  │                   │
+│  │  ┌────┬────┬────┬───┐│  │  (Metrics, etc) │                   │
+│  │  │Open│Anth│Zhip│Mini││  └─────────────────┘                   │
+│  │  │ AI │ropic│ pu │Max ││                                       │
+│  │  └────┴────┴────┴───┘│                                       │
+│  └──────────────────────┘                                       │
+│                      │                                            │
+│       ┌──────────────┼──────────────┐                             │
+│       ▼              ▼              ▼                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐                    │
+│  │MemoryStore│  │Personality│  │TaskPlanner   │                    │
+│  │ (Memory)  │  │(Soul)    │  │ (Autonomous) │                    │
+│  └──────────┘  └──────────┘  └──────────────┘                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Design Principles:**
+
+- **Layered Decoupling** — Core layer has zero Spring dependencies; Spring layer handles bridging
+- **Provider Abstraction** — Unified `LlmProvider` interface for all LLM providers
+- **Event-Driven** — Lifecycle events at all key points for extensibility
+- **Extensible** — Tools, transformers, and listeners defined via interfaces
+- **Markdown-First** — Memory and personality stored as Markdown for LLM/human readability
+- **Runtime Flexibility** — Switch providers at runtime without code changes
+
+## Quick Start
+
+### 1. Add Dependency
 
 ```xml
 <dependency>
     <groupId>com.easyagent4j</groupId>
     <artifactId>easyagent4j-spring-boot-starter</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>0.3.0-SNAPSHOT</version>
+</dependency>
+
+<!-- Add provider(s) as needed -->
+<dependency>
+    <groupId>com.easyagent4j</groupId>
+    <artifactId>easyagent4j-provider-openai</artifactId>
+    <version>0.3.0-SNAPSHOT</version>
 </dependency>
 ```
 
-### 2. 配置
-
-在 `application.yml` 中添加配置（可选，以下为默认值）：
+### 2. Configure
 
 ```yaml
 easyagent:
@@ -47,46 +108,75 @@ easyagent:
   max-tool-iterations: 10
   tool-execution-mode: PARALLEL  # PARALLEL | SEQUENTIAL
   streaming: true
+  autonomous-mode: false
+  
+  # Multi-model provider configuration
+  chat-provider: openai  # Default provider
+  provider:
+    openai:
+      enabled: true
+      base-url: https://api.openai.com
+      api-key: ${OPENAI_API_KEY}
+      model: gpt-4o
+      max-tokens: 4096
+      temperature: 0.7
+    anthropic:
+      enabled: false
+      base-url: https://api.anthropic.com
+      api-key: ${ANTHROPIC_API_KEY}
+      model: claude-sonnet-4-20250514
+    zhipu:
+      enabled: false
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      api-key: ${ZHIPU_API_KEY}
+      model: glm-4
+    minimax:
+      enabled: false
+      api-key: ${MINIMAX_API_KEY}
+      model: abab6.5s-chat
+  
+  # Memory system
+  memory:
+    enabled: true
+    base-path: ./agent-memory
+    auto-consolidate: false
+  
+  # Personality
+  personality:
+    name: "Assistant"
+    personality-path: classpath:personality.md
+  
+  # Context
   context:
     max-messages: 50
 ```
 
-确保项目中已配置 Spring AI 的 ChatModel（如 OpenAI、通义千问等）：
-
-```yaml
-spring:
-  ai:
-    openai:
-      api-key: ${OPENAI_API_KEY}
-      chat:
-        options:
-          model: gpt-4o
-```
-
-### 3. 定义工具
-
-通过实现 `AgentTool` 接口：
+### 3. Define Tools
 
 ```java
 @Component
 public class WeatherTool extends AbstractAgentTool {
 
     @Override
-    public String getName() { return "get_weather"; }
+    public String getName() {
+        return "get_weather";
+    }
 
     @Override
-    public String getDescription() { return "Get current weather for a city"; }
+    public String getDescription() {
+        return "Get current weather for a city";
+    }
 
     @Override
     public ToolResult execute(ToolCall toolCall, ToolContext context) {
         String city = parseArgument(toolCall, "city");
-        // 调用天气API...
+        // Call weather API...
         return ToolResult.success("Weather in " + city + ": Sunny, 25°C");
     }
 }
 ```
 
-### 4. 启动并运行
+### 4. Use Agent
 
 ```java
 @RestController
@@ -95,65 +185,80 @@ public class ChatController {
     @Autowired
     private Agent agent;
 
-    @Autowired
-    private AgentEventPublisher eventPublisher;
-
     @GetMapping("/chat")
     public String chat(@RequestParam String message) {
-        // 订阅事件（如指标采集）
-        // eventPublisher.subscribe(metricsEventListener);
-
-        String response = agent.chat(message);
-        return response;
+        return agent.chat(message);
+    }
+    
+    // Runtime provider switching
+    @PostMapping("/switch-provider")
+    public String switchProvider(@RequestParam String provider) {
+        registry.setDefault(provider);
+        return "Switched to " + provider;
     }
 }
 ```
 
-## 📦 模块说明
+## Multi-Model Provider Configuration
 
-| 模块 | 说明 |
-|------|------|
-| **easyagent4j-core** | 核心模块：Agent 运行时、工具系统、事件模型、消息抽象、上下文管理 |
-| **easyagent4j-spring** | Spring AI 集成层：ChatModel 适配器、自动配置、可观测性 |
-| **easyagent4j-spring-boot-starter** | Spring Boot Starter：开箱即用的自动装配 |
-| **easyagent4j-examples** | 示例项目：基础对话、工具调用等 |
+EasyAgent4j supports multiple LLM providers through a unified abstraction layer. Enable providers as needed and switch between them at runtime.
 
-```
-easyagent4j/
-├── easyagent4j-core/                    # 核心模块
-│   ├── agent/                           # Agent 运行时（Agent, AgentLoop, AgentConfig, AgentState）
-│   ├── chat/                            # Chat 模型抽象（ChatModel, ChatRequest, ChatResponse）
-│   ├── context/                         # 上下文与消息转换
-│   ├── event/                           # 事件系统（Publisher, Listener, 各类事件）
-│   ├── message/                         # 消息模型（User, Assistant, System, ToolResult）
-│   ├── tool/                            # 工具系统（AgentTool, ToolDefinition, ToolHook）
-│   ├── memory/                          # 记忆模块（MemoryStore, FileMemoryStore, MemoryPromptBuilder）
-│   ├── personality/                     # 性格模块（AgentPersonality, PersonalityLoader）
-│   ├── task/                            # 自主任务（TaskPlan, AutonomousAgentLoop, DefaultTaskPlanner）
-│   ├── resilience/                      # 容错（RetryPolicy）
-│   └── exception/                       # 异常体系
-├── easyagent4j-spring/                  # Spring AI 集成
-│   ├── autoconfigure/                   # 自动配置
-│   ├── chat/                            # Spring AI ChatModel 适配
-│   ├── message/                         # 消息格式转换
-│   ├── observability/                   # 可观测性（指标采集）
-│   ├── properties/                      # 配置属性
-│   └── tool/                            # 工具适配
-├── easyagent4j-spring-boot-starter/     # Starter 模块
-└── easyagent4j-examples/                # 示例项目
+### Provider Modules
+
+| Provider | Module | Supported Models | Compatibility |
+|----------|--------|------------------|---------------|
+| **OpenAI** | `easyagent4j-provider-openai` | GPT-4o, GPT-4, GPT-3.5 | OpenAI API format (compatible with DeepSeek, Qwen, Moonshot, etc.) |
+| **Anthropic** | `easyagent4j-provider-anthropic` | Claude 3.5 Sonnet, Claude 3 Opus | Anthropic Messages API |
+| **Zhipu GLM** | `easyagent4j-provider-zhipu` | GLM-4, GLM-3 | OpenAI-compatible API |
+| **MiniMax** | `easyagent4j-provider-minimax` | abab6.5s, abab6.5 | MiniMax Chat API |
+
+### Runtime Provider Switching
+
+```java
+@Autowired
+private LlmProviderRegistry registry;
+
+// Switch to Anthropic
+registry.setDefault("anthropic");
+
+// Switch to Zhipu
+registry.setDefault("zhipu");
+
+// Switch back to OpenAI
+registry.setDefault("openai");
 ```
 
-## 🧩 核心概念
+### Provider-Specific Configuration
+
+Each provider can be configured independently:
+
+```yaml
+easyagent:
+  chat-provider: openai  # Default provider
+  
+  provider:
+    openai:
+      enabled: true
+      base-url: https://api.openai.com  # Change for OpenAI-compatible APIs
+      api-key: ${OPENAI_API_KEY}
+      model: gpt-4o
+      max-tokens: 4096
+      temperature: 0.7
+      timeout-seconds: 60
+```
+
+## Core Concepts
 
 ### Agent
 
-`Agent` 是框架的核心。它封装了 LLM 对话循环，自动处理工具调用、消息管理和多轮交互：
+The `Agent` is the core abstraction. It encapsulates the LLM conversation loop, handling tool calls, message management, and multi-turn interactions:
 
 ```java
 AgentConfig config = AgentConfig.builder()
     .systemPrompt("You are a helpful assistant.")
     .maxToolIterations(10)
     .streamingEnabled(true)
+    .toolExecutionMode(ToolExecutionMode.PARALLEL)
     .build();
 
 Agent agent = new Agent(config, chatModel);
@@ -162,188 +267,316 @@ agent.registerTool(myTool);
 String response = agent.chat("What's the weather in Beijing?");
 ```
 
-### 工具（Tools）
+### Tools
 
-Agent 可以调用外部工具来扩展能力。框架提供两种工具定义方式：
+Define tools to extend agent capabilities:
 
-**接口方式：** 继承 `AbstractAgentTool`，实现 `getName()`、`getDescription()`、`execute()`
+**Interface-based:**
 
-**注解方式（规划中）：** 使用 `@AgentTool` 注解标注 Spring Bean 方法
+```java
+@Component
+public class CalculatorTool extends AbstractAgentTool {
+    @Override
+    public String getName() { return "calculate"; }
+    
+    @Override
+    public String getDescription() { return "Perform mathematical calculations"; }
+    
+    @Override
+    public ToolResult execute(ToolCall toolCall, ToolContext context) {
+        String expression = parseArgument(toolCall, "expression");
+        double result = evaluate(expression);
+        return ToolResult.success(String.valueOf(result));
+    }
+}
+```
 
-### 事件系统
+### Memory System
 
-完整的 Agent 生命周期事件，可用于日志、监控、审计等：
+File-based persistent memory supporting long-term, short-term, and user preferences:
 
-| 事件 | 说明 |
-|------|------|
-| `agent_start` | Agent 开始运行 |
-| `agent_end` | Agent 运行结束 |
-| `turn_start` | 新一轮对话开始 |
-| `turn_end` | 一轮对话结束 |
-| `message_start` | 消息开始生成 |
-| `message_update` | 流式消息更新 |
-| `message_end` | 消息生成完成 |
-| `tool_execution_start` | 工具开始执行 |
-| `tool_execution_update` | 工具执行进度更新 |
-| `tool_execution_end` | 工具执行结束 |
-| `error` | 错误事件 |
+```java
+// Configure memory
+MemoryConfig memoryConfig = MemoryConfig.builder()
+    .basePath("./agent-memory")
+    .enabled(true)
+    .autoConsolidate(false)
+    .build();
 
-### 可观测性
+AgentConfig config = AgentConfig.builder()
+    .memory(memoryConfig)
+    .build();
 
-内置 `AgentMetrics` 接口和 `DefaultAgentMetrics` 内存实现，自动通过 `MetricsEventListener` 采集指标：
+// The agent automatically saves interactions and retrieves relevant memories
+String response = agent.chat("Remember that I prefer Python for data analysis");
+```
+
+Memory types:
+- **Long-term**: Persistent facts and preferences
+- **Short-term**: Temporary context for current session
+- **User Preferences**: User-specific settings and choices
+
+### Personality System
+
+Define agent personality via JSON or Markdown:
+
+**personality.md:**
+```markdown
+# Agent Personality
+
+## Name
+Claude Assistant
+
+## Role
+Helpful AI assistant
+
+## Tone
+Professional, friendly, concise
+
+## Style
+- Use clear, simple language
+- Provide actionable advice
+- Ask clarifying questions when needed
+
+## Boundaries
+- Do not provide medical or legal advice
+- Do not engage in harmful activities
+- Respect user privacy
+```
+
+```yaml
+easyagent:
+  personality:
+    personality-path: classpath:personality.md
+```
+
+### Autonomous Task Loop
+
+Enable autonomous mode for LLM-driven task planning and execution:
+
+```yaml
+easyagent:
+  autonomous-mode: true
+```
+
+The agent will:
+1. Decompose tasks into subtasks
+2. Execute tools in sequence
+3. Monitor progress and replan if needed
+4. Review results and provide final output
+
+```java
+AgentConfig config = AgentConfig.builder()
+    .autonomousMode(true)
+    .build();
+
+Agent agent = new Agent(config, chatModel);
+agent.registerTool(myTool);
+
+String result = agent.chat("Analyze recent sales data and generate a report");
+// Agent automatically breaks down the task, executes tools, and generates report
+```
+
+### Event System
+
+Subscribe to agent lifecycle events for logging, monitoring, and custom logic:
+
+```java
+@Component
+public class LoggingEventListener implements AgentEventListener {
+    
+    @Override
+    public void onEvent(AgentEvent event) {
+        switch (event.getType()) {
+            case AGENT_START:
+                log.info("Agent started: {}", event.getSessionId());
+                break;
+            case TOOL_EXECUTION_START:
+                log.info("Tool execution started: {}", event.getToolName());
+                break;
+            case ERROR:
+                log.error("Agent error: {}", event.getError().getMessage());
+                break;
+        }
+    }
+}
+```
+
+**Event Types:**
+- `AGENT_START` / `AGENT_END`
+- `TURN_START` / `TURN_END`
+- `MESSAGE_START` / `MESSAGE_UPDATE` / `MESSAGE_END`
+- `TOOL_EXECUTION_START` / `TOOL_EXECUTION_UPDATE` / `TOOL_EXECUTION_END`
+- `ERROR`
+
+### Observability
+
+Built-in metrics collection with Micrometer/Prometheus support:
 
 ```java
 @Autowired
-private DefaultAgentMetrics metrics;
+private AgentMetrics metrics;
 
-// 获取指标快照
+// Get metrics snapshot
 Map<String, Number> snapshot = metrics.getMetricsSnapshot();
 // => {easyagent.agent.runs=5, easyagent.tokens.input=1200, easyagent.tool.executions=12, ...}
 ```
 
-当项目引入 Micrometer 时，可实现 `AgentMetrics` 接口桥接到 Prometheus/Grafana。
+Metrics collected:
+- Agent runs
+- Turn counts
+- Token usage (input/output)
+- Tool executions
+- Tool failures
+- Response times
 
-### Steering 机制
+## Modules
 
-运行时动态修改 Agent 行为方向：
+| Module | Description |
+|--------|-------------|
+| **easyagent4j-core** | Core runtime: Agent, AgentLoop, Provider abstraction, Tools, Events, Memory, Personality, Task planning |
+| **easyagent4j-provider-openai** | OpenAI provider (compatible with OpenAI, DeepSeek, Qwen, Moonshot, etc.) |
+| **easyagent4j-provider-anthropic** | Anthropic Claude provider |
+| **easyagent4j-provider-zhipu** | Zhipu GLM provider |
+| **easyagent4j-provider-minimax** | MiniMax provider |
+| **easyagent4j-spring** | Spring integration: AutoConfiguration, ChatModel adaptation, Observability |
+| **easyagent4j-spring-boot-starter** | Spring Boot starter with auto-configuration |
+| **easyagent4j-examples** | Example applications |
+
+## Configuration Reference
+
+### Core Configuration
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `easyagent.system-prompt` | `You are a helpful assistant.` | System prompt for the agent |
+| `easyagent.max-tool-iterations` | `10` | Maximum tool iterations per turn |
+| `easyagent.tool-execution-mode` | `PARALLEL` | Tool execution mode: `PARALLEL` or `SEQUENTIAL` |
+| `easyagent.streaming` | `true` | Enable streaming output |
+| `easyagent.autonomous-mode` | `false` | Enable autonomous task loop |
+| `easyagent.chat-provider` | `openai` | Default LLM provider |
+
+### Provider Configuration
+
+| Property | Description |
+|----------|-------------|
+| `easyagent.provider.openai.enabled` | Enable OpenAI provider |
+| `easyagent.provider.openai.base-url` | OpenAI API base URL |
+| `easyagent.provider.openai.api-key` | OpenAI API key |
+| `easyagent.provider.openai.model` | Model name (e.g., `gpt-4o`) |
+| `easyagent.provider.openai.max-tokens` | Maximum output tokens |
+| `easyagent.provider.openai.temperature` | Sampling temperature |
+| `easyagent.provider.openai.timeout-seconds` | Request timeout |
+
+Similar configuration blocks for `anthropic`, `zhipu`, and `minimax`.
+
+### Memory Configuration
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `easyagent.memory.enabled` | `false` | Enable memory system |
+| `easyagent.memory.base-path` | `./agent-memory` | Memory storage directory |
+| `easyagent.memory.auto-consolidate` | `false` | Auto-consolidate memories |
+
+### Personality Configuration
+
+| Property | Description |
+|----------|-------------|
+| `easyagent.personality.name` | Agent name |
+| `easyagent.personality.personality-path` | Path to personality file (JSON or Markdown) |
+
+### Context Configuration
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `easyagent.context.max-messages` | `50` | Maximum messages in context (sliding window) |
+
+## Advanced Usage
+
+### Custom Message Transformer
+
+Implement custom context management:
 
 ```java
-agent.applySteering(AgentSteering.of(
-    "请用简洁的中文回答后续所有问题。"
-));
+@Component
+public class TokenBudgetTransformer implements MessageTransformer {
+    
+    private final int maxTokens;
+    
+    public TokenBudgetTransformer(int maxTokens) {
+        this.maxTokens = maxTokens;
+    }
+    
+    @Override
+    public List<Message> transform(List<Message> messages) {
+        // Implement token budget logic
+        List<Message> filtered = new ArrayList<>();
+        int currentTokens = 0;
+        
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            int tokens = estimateTokens(messages.get(i));
+            if (currentTokens + tokens > maxTokens) break;
+            filtered.add(0, messages.get(i));
+            currentTokens += tokens;
+        }
+        
+        return filtered;
+    }
+}
 ```
 
-### 记忆系统
-
-基于 Markdown 文件的持久化记忆，支持长期记忆、短期记忆和用户偏好三种类型：
+### Custom Retry Policy
 
 ```java
-// 配置记忆存储
-MemoryStore memoryStore = new FileMemoryStore("/path/to/memory");
-
-// 保存记忆
-MemoryEntry entry = MemoryEntry.builder()
-    .type(MemoryType.LONG_TERM)
-    .content("用户偏好使用 Python 进行数据分析")
-    .tags("preference", "python")
-    .build();
-memoryStore.save(entry);
-
-// 查询记忆
-List<MemoryEntry> memories = memoryStore.search("数据分析");
-
-// MemoryPromptBuilder 自动将记忆注入 system prompt
-MemoryPromptBuilder promptBuilder = new MemoryPromptBuilder(memoryStore);
-String enrichedPrompt = promptBuilder.build(originalPrompt);
+@Bean
+public RetryPolicy customRetryPolicy() {
+    return RetryPolicy.builder()
+        .maxRetries(5)
+        .initialBackoffMillis(1000)
+        .maxBackoffMillis(30000)
+        .backoffMultiplier(2.0)
+        .retryableExceptions(IOException.class, TimeoutException.class)
+        .build();
+}
 ```
 
-在 `application.yml` 中配置：
-
-```yaml
-easyagent:
-  memory:
-    enabled: true
-    base-path: ./memory
-```
-
-### 自主任务循环
-
-LLM 驱动的任务规划与执行，支持自动 replan 和审查机制：
+### Streaming with SSE
 
 ```java
-// 启用自主模式
-AgentConfig config = AgentConfig.builder()
-    .autonomous(true)
-    .build();
-
-// 自主 Agent 会自动规划任务并执行
-Agent agent = new Agent(config, chatModel);
-agent.registerTool(myTool);
-
-String result = agent.chat("帮我分析最近的销售数据并生成报告");
-// Agent 会自动分解任务、调用工具、生成报告
+@RestController
+public class StreamingController {
+    
+    @Autowired
+    private Agent agent;
+    
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> streamChat(@RequestParam String message) {
+        return agent.stream(message)
+            .map(chunk -> "data: " + chunk.getContent() + "\n\n");
+    }
+}
 ```
 
-自主模式工作流程：
-1. LLM 生成任务计划（TaskPlan）
-2. 按计划执行任务步骤（TaskStep）
-3. 每步执行后检查是否需要 replan
-4. 所有任务完成后进行审查并返回结果
+## Examples
 
-在 `application.yml` 中启用：
+See the `easyagent4j-examples` module for complete examples:
 
-```yaml
-easyagent:
-  autonomous: true
+- **basic** — Simple chat with agent
+- **tools** — Tool calling example
+- **web** — REST API with streaming
+
+## Testing
+
+The project includes comprehensive unit tests. Run tests with:
+
+```bash
+mvn test
 ```
 
-## ⚙️ 配置参考
+## License
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `easyagent.system-prompt` | `You are a helpful assistant.` | 系统提示词 |
-| `easyagent.max-tool-iterations` | `10` | 单轮最大工具迭代次数 |
-| `easyagent.tool-execution-mode` | `PARALLEL` | 工具执行模式：`PARALLEL`（并行）/ `SEQUENTIAL`（串行） |
-| `easyagent.streaming` | `true` | 是否启用流式输出 |
-| `easyagent.context.max-messages` | `50` | 上下文最大消息数（滑动窗口） |
-| `easyagent.personality.path` | - | 性格配置文件路径（JSON 或 Markdown 格式） |
-| `easyagent.memory.base-path` | - | 记忆文件存储路径 |
-| `easyagent.memory.enabled` | `false` | 是否启用记忆系统 |
-| `easyagent.retry.max-retries` | `3` | 最大重试次数 |
-| `easyagent.autonomous` | `false` | 是否启用自主模式（任务循环） |
+[MIT License](LICENSE) © 2026 Chen Jiaming
 
-## 🏗️ 架构设计
+## Acknowledgments
 
-```
-┌─────────────────────────────────────────────────┐
-│                  Application                      │
-│                                                   │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │ REST API  │  │ WebSocket│  │  Message Queue│  │
-│  └────┬─────┘  └────┬─────┘  └──────┬────────┘  │
-│       └──────────────┼───────────────┘            │
-│                      ▼                            │
-│  ┌───────────────────────────────────────────┐   │
-│  │              Agent (core)                  │   │
-│  │  ┌─────────┐  ┌──────────┐  ┌──────────┐  │   │
-│  │  │AgentLoop│  │AgentState│  │ Steering │  │   │
-│  │  └────┬────┘  └──────────┘  └──────────┘  │   │
-│  │       ▼                                     │   │
-│  │  ┌─────────────────────────────────────┐   │   │
-│  │  │         AgentContext                 │   │   │
-│  │  │  Messages + Attributes + SessionId   │   │   │
-│  │  └─────────────────────────────────────┘   │   │
-│  └───────────────────────────────────────────┘   │
-│                      │                            │
-│       ┌──────────────┼──────────────┐             │
-│       ▼              ▼              ▼             │
-│  ┌─────────┐  ┌──────────┐  ┌──────────────┐    │
-│  │ChatModel│  │  Tools   │  │EventPublisher│    │
-│  │(SpringAI)│  │(Tools)   │  │  (Events)   │    │
-│  └────┬────┘  └──────────┘  └──────┬───────┘    │
-│       ▼                            ▼             │
-│  ┌──────────┐              ┌────────────────┐    │
-│  │ LLM API  │              │ EventListeners │    │
-│  │(OpenAI等)│              │  (Metrics等)   │    │
-│  └──────────┘              └────────────────┘    │
-│                      │                            │
-│       ┌──────────────┼──────────────┐             │
-│       ▼              ▼              ▼             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐    │
-│  │MemoryStore│  │Personality│  │TaskPlanner   │    │
-│  │ (Memory)  │  │(Soul)    │  │ (Autonomous) │    │
-│  └──────────┘  └──────────┘  └──────────────┘    │
-└─────────────────────────────────────────────────┘
-```
-
-**设计理念：**
-
-- **分层解耦** — core 层零 Spring 依赖，spring 层负责桥接
-- **事件驱动** — 所有生命周期关键节点发布事件，支持可插拔监听
-- **可扩展** — 工具、消息转换器、事件监听器均通过接口定义，易于扩展
-- **轻量优先** — 核心模块无外部依赖（除 SLF4J），按需引入 Spring AI
-- **Markdown优先** — 记忆和性格均以 Markdown 文件存储，对 LLM 友好、人类可读
-
-## 📄 License
-
-[MIT License](LICENSE) © 2026 陈佳铭
+Inspired by [OpenClaw](https://github.com/zhilei/openclaw) — Agent-driven development framework.

@@ -9,6 +9,9 @@ import com.easyagent4j.core.memory.FileMemoryStore;
 import com.easyagent4j.core.memory.MemoryStore;
 import com.easyagent4j.core.personality.AgentPersonality;
 import com.easyagent4j.core.personality.PersonalityLoader;
+import com.easyagent4j.core.provider.LlmProvider;
+import com.easyagent4j.core.provider.LlmProviderRegistry;
+import com.easyagent4j.core.provider.ProviderChatModelAdapter;
 import com.easyagent4j.core.resilience.RetryPolicy;
 import com.easyagent4j.core.tool.ToolExecutionMode;
 import com.easyagent4j.spring.chat.SpringAiChatModelAdapter;
@@ -74,11 +77,52 @@ public class EasyAgentAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(LlmProviderRegistry.class)
+    public LlmProviderRegistry llmProviderRegistry(java.util.List<LlmProvider> providers, EasyAgentProperties props) {
+        LlmProviderRegistry registry = new LlmProviderRegistry();
+        
+        // 注册所有可用的Provider
+        if (providers != null) {
+            for (LlmProvider provider : providers) {
+                registry.register(provider);
+                log.info("Registered LLM provider: {}", provider.getName());
+            }
+        }
+        
+        // 设置默认Provider
+        String defaultProvider = props.getChatProvider();
+        if (defaultProvider != null && !defaultProvider.isEmpty()) {
+            registry.setDefault(defaultProvider);
+            log.info("Set default LLM provider: {}", defaultProvider);
+        }
+        
+        return registry;
+    }
+
+    @Bean
     @ConditionalOnMissingBean(ChatModel.class)
-    public ChatModel easyAgentChatModel(java.util.Map<String, org.springframework.ai.chat.model.ChatModel> chatModels,
+    public ChatModel easyAgentChatModel(LlmProviderRegistry registry,
+                                         java.util.Map<String, org.springframework.ai.chat.model.ChatModel> chatModels,
                                          EasyAgentProperties props) {
-        String provider = props.getChatProvider().toLowerCase();
-        String beanName = switch (provider) {
+        // 优先从Provider Registry中查找
+        String providerName = props.getChatProvider();
+        if (providerName != null && !providerName.isEmpty()) {
+            LlmProvider provider = registry.get(providerName);
+            if (provider != null) {
+                log.info("Using LLM provider: {}", providerName);
+                return new ProviderChatModelAdapter(provider);
+            }
+        }
+        
+        // Fallback到第一个可用的Provider
+        LlmProvider defaultProvider = registry.getDefault();
+        if (defaultProvider != null) {
+            log.info("Using default LLM provider: {}", defaultProvider.getName());
+            return new ProviderChatModelAdapter(defaultProvider);
+        }
+        
+        // Fallback到Spring AI ChatModel（兼容旧版）
+        String beanName = switch (providerName.toLowerCase()) {
             case "zhipuai", "zhipu" -> "zhiPuAiChatModel";
             case "openai" -> "openAiChatModel";
             default -> "openAiChatModel";
@@ -91,7 +135,7 @@ public class EasyAgentAutoConfiguration {
             log.warn("Requested chat model '{}' not found, using first available", beanName);
         }
 
-        log.info("Using chat model: {}", beanName);
+        log.info("Using Spring AI chat model: {}", beanName);
         return new SpringAiChatModelAdapter(springChatModel);
     }
 

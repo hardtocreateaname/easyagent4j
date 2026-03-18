@@ -21,6 +21,10 @@
 
     <modules>
         <module>easyagent4j-core</module>
+        <module>easyagent4j-provider-openai</module>
+        <module>easyagent4j-provider-anthropic</module>
+        <module>easyagent4j-provider-zhipu</module>
+        <module>easyagent4j-provider-minimax</module>
         <module>easyagent4j-spring</module>
         <module>easyagent4j-spring-boot-starter</module>
         <module>easyagent4j-examples</module>
@@ -39,6 +43,26 @@
             <dependency>
                 <groupId>com.easyagent4j</groupId>
                 <artifactId>easyagent4j-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>easyagent4j-provider-openai</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>easyagent4j-provider-anthropic</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>easyagent4j-provider-zhipu</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.easyagent4j</groupId>
+                <artifactId>easyagent4j-provider-minimax</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
