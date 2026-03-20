@@ -196,7 +196,7 @@ public class AgentLoop {
 
     private boolean enqueueNextSteeringMessage(AgentContext context, boolean hadToolCalls) {
         if (steering == null) {
-            return true;
+            return hadToolCalls;
         }
 
         if (steering.pollStopRequested()) {
