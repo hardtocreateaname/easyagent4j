@@ -110,20 +110,10 @@ public class AgentLoop {
         // 2. 主循环
         int iteration = 0;
         while (iteration < config.getMaxToolIterations() && !aborted) {
-            // 2.0 检查转向状态
-            if (steering != null) {
-                SteeringCommand cmd = steering.pollCommand();
-                if (cmd == SteeringCommand.STOP) {
-                    log.info("Agent loop stopped by steering command");
-                    break;
-                } else if (cmd == SteeringCommand.STEER) {
-                    String overridePrompt = steering.consumeOverrideSystemPrompt();
-                    if (overridePrompt != null) {
-                        log.info("Agent loop steered with new system prompt");
-                        // 通过设置config属性来使用覆盖的system prompt
-                        config.applySystemPromptOverride(overridePrompt);
-                    }
-                }
+            // 2.0 检查停止信号
+            if (steering != null && steering.pollStopRequested()) {
+                log.info("Agent loop stopped by steering command");
+                break;
             }
 
             eventPublisher.publish(new TurnStartEvent(context));
@@ -167,7 +157,11 @@ public class AgentLoop {
             List<ToolCall> toolCalls = assistantMessage.getToolCalls();
             if (toolCalls == null || toolCalls.isEmpty()) {
                 eventPublisher.publish(new TurnEndEvent(context, List.of()));
-                break;
+                if (!enqueueNextSteeringMessage(context, false)) {
+                    break;
+                }
+                iteration++;
+                continue;
             }
 
             // 2.7 执行工具（根据模式选择串行或并行）
@@ -184,6 +178,9 @@ public class AgentLoop {
             }
 
             eventPublisher.publish(new TurnEndEvent(context, toolResults));
+            if (!enqueueNextSteeringMessage(context, true)) {
+                break;
+            }
             iteration++;
         }
 
@@ -195,6 +192,31 @@ public class AgentLoop {
         }
 
         return context;
+    }
+
+    private boolean enqueueNextSteeringMessage(AgentContext context, boolean hadToolCalls) {
+        if (steering == null) {
+            return true;
+        }
+
+        if (steering.pollStopRequested()) {
+            log.info("Agent loop stopped by steering command");
+            return false;
+        }
+
+        AgentMessage nextMessage = steering.pollSteeringMessage();
+        if (nextMessage == null && !hadToolCalls) {
+            nextMessage = steering.pollFollowUpMessage();
+        }
+
+        if (nextMessage == null) {
+            return hadToolCalls;
+        }
+
+        context.addMessage(nextMessage);
+        eventPublisher.publish(new MessageStartEvent(context, nextMessage));
+        eventPublisher.publish(new MessageEndEvent(context, nextMessage));
+        return true;
     }
 
     private AssistantMessage callWithStreaming(ChatRequest request, AgentContext context) {

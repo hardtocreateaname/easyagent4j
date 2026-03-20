@@ -135,6 +135,50 @@ class AgentLoopIntegrationTest {
         assertFalse(finalAssistant.hasToolCalls());
     }
 
+    @Test
+    @DisplayName("testSteeringAfterToolExecution: tool结束后优先消费steering消息")
+    void testSteeringAfterToolExecution() {
+        mockChatModel.addToolCallResponse("call_1", "test_tool", "{}");
+        mockChatModel.addTextResponse("已按新的方向继续处理");
+
+        AgentConfig config = defaultConfig();
+        AgentSteering steering = new AgentSteering();
+        steering.steer("改为输出排查结论");
+
+        AgentLoop loop = createLoop(config, steering);
+        AgentContext context = new AgentContext("test-session");
+
+        AgentContext result = loop.execute(new UserMessage("先执行工具"), context);
+
+        assertEquals(5, result.getMessageCount());
+        assertEquals(MessageRole.USER, result.getMessages().get(3).getRole());
+        assertEquals("改为输出排查结论", ((UserMessage) result.getMessages().get(3)).getTextContent());
+        assertEquals("已按新的方向继续处理",
+            ((AssistantMessage) result.getMessages().get(4)).getTextContent());
+    }
+
+    @Test
+    @DisplayName("testFollowUpAfterPlainText: 无tool call时消费follow-up消息")
+    void testFollowUpAfterPlainText() {
+        mockChatModel.addTextResponse("第一轮先确认状态");
+        mockChatModel.addTextResponse("第二轮处理follow-up");
+
+        AgentConfig config = defaultConfig();
+        AgentSteering steering = new AgentSteering();
+        steering.followUp("继续输出最终总结");
+
+        AgentLoop loop = createLoop(config, steering);
+        AgentContext context = new AgentContext("test-session");
+
+        AgentContext result = loop.execute(new UserMessage("开始"), context);
+
+        assertEquals(4, result.getMessageCount());
+        assertEquals(MessageRole.USER, result.getMessages().get(2).getRole());
+        assertEquals("继续输出最终总结", ((UserMessage) result.getMessages().get(2)).getTextContent());
+        assertEquals("第二轮处理follow-up",
+            ((AssistantMessage) result.getMessages().get(3)).getTextContent());
+    }
+
     // ========== Test 3: Max Iterations ==========
 
     @Test

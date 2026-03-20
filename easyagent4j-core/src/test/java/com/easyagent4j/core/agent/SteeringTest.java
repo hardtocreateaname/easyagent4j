@@ -40,9 +40,9 @@ class SteeringTest {
     }
 
     @Test
-    @DisplayName("steer()设置STEER命令和覆盖的system prompt")
+    @DisplayName("steer()将消息加入steering队列")
     void testSteer() {
-        String newPrompt = "You are now a coding assistant.";
+        String newPrompt = "切换到代码模式";
         steering.steer(newPrompt);
         assertTrue(steering.hasActiveCommand());
         assertEquals(newPrompt, steering.getOverrideSystemPrompt());
@@ -50,13 +50,14 @@ class SteeringTest {
         SteeringCommand cmd = steering.pollCommand();
         assertEquals(SteeringCommand.STEER, cmd);
 
-        // pollCommand清除命令，但覆盖的prompt需要单独consume
-        assertFalse(steering.hasActiveCommand());
+        // pollCommand不消费消息，待处理的steering仍然存在
+        assertTrue(steering.hasActiveCommand());
         assertEquals(newPrompt, steering.getOverrideSystemPrompt());
 
-        // consumeOverrideSystemPrompt应该清除覆盖
+        // consumeOverrideSystemPrompt消费steering消息
         String consumed = steering.consumeOverrideSystemPrompt();
         assertEquals(newPrompt, consumed);
+        assertFalse(steering.hasActiveCommand());
         assertNull(steering.getOverrideSystemPrompt());
     }
 
@@ -71,13 +72,16 @@ class SteeringTest {
     }
 
     @Test
-    @DisplayName("多次steer只保留最后一次的prompt")
+    @DisplayName("多次steer按队列顺序保留所有消息")
     void testMultipleSteer() {
         steering.steer("prompt1");
         steering.steer("prompt2");
         steering.steer("prompt3");
 
-        assertEquals("prompt3", steering.getOverrideSystemPrompt());
+        assertEquals("prompt1", steering.getOverrideSystemPrompt());
+        assertEquals("prompt1", steering.consumeOverrideSystemPrompt());
+        assertEquals("prompt2", steering.consumeOverrideSystemPrompt());
+        assertEquals("prompt3", steering.consumeOverrideSystemPrompt());
     }
 
     @Test
@@ -89,7 +93,7 @@ class SteeringTest {
         SteeringCommand cmd = steering.pollCommand();
         assertEquals(SteeringCommand.STOP, cmd);
 
-        // stop不清除覆盖的prompt
+        // stop不清除待处理的steering消息
         assertEquals("some prompt", steering.getOverrideSystemPrompt());
     }
 
@@ -132,12 +136,23 @@ class SteeringTest {
         cmd = steering.pollCommand();
         assertEquals(SteeringCommand.STEER, cmd);
 
-        // 消费覆盖的system prompt
+        // 消费steering消息
         String override = steering.consumeOverrideSystemPrompt();
         assertEquals("切换到代码模式", override);
 
         // 之后的循环检查：无命令
         cmd = steering.pollCommand();
         assertEquals(SteeringCommand.CONTINUE, cmd);
+    }
+
+    @Test
+    @DisplayName("followUp单独排队，不会触发STEER命令")
+    void testFollowUpQueue() {
+        steering.followUp("继续处理剩余任务");
+
+        assertFalse(steering.hasActiveCommand());
+        assertEquals(SteeringCommand.CONTINUE, steering.pollCommand());
+        assertNull(steering.pollSteeringMessage());
+        assertNotNull(steering.pollFollowUpMessage());
     }
 }

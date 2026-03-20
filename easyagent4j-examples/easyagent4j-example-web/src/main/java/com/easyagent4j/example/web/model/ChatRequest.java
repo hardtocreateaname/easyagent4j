@@ -19,6 +19,12 @@ public class ChatRequest {
     @JsonProperty("stream")
     private boolean stream = false;
 
+    @JsonProperty("parent_session_id")
+    private String parentSessionId;
+
+    @JsonProperty("inherit_messages")
+    private Boolean inheritMessages = true;
+
     public ChatRequest() {}
 
     public ChatRequest(String message) {
@@ -33,4 +39,8 @@ public class ChatRequest {
     public void setSystemPrompt(String systemPrompt) { this.systemPrompt = systemPrompt; }
     public boolean isStream() { return stream; }
     public void setStream(boolean stream) { this.stream = stream; }
+    public String getParentSessionId() { return parentSessionId; }
+    public void setParentSessionId(String parentSessionId) { this.parentSessionId = parentSessionId; }
+    public Boolean getInheritMessages() { return inheritMessages; }
+    public void setInheritMessages(Boolean inheritMessages) { this.inheritMessages = inheritMessages; }
 }

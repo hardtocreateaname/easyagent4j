@@ -21,6 +21,7 @@ EasyAgent4j is a Java framework for building AI agents with multi-turn conversat
 - **Agent Loop** — Autonomous execution with automatic tool calling, parallel/sequential execution modes, and iterative refinement
 - **Tool System** — Define tools via interface or annotations with built-in support for parallel execution and result aggregation
 - **Memory System** — File-based persistent memory (long-term, short-term, user preferences) with automatic consolidation and prompt injection
+- **Session Tree & Sub-Agents** — Spawn isolated child agents with inherited snapshots, session tree tracking, and forked memory stores
 - **Personality System** — Configure agent personality (name, role, tone, style, boundaries) via JSON or Markdown (SOUL.md format)
 - **Task Planning** — LLM-driven autonomous task decomposition, execution, and review with automatic replanning
 - **Event-Driven Architecture** — Complete lifecycle events (start/end/tool/message/turn) for observability and custom hooks
@@ -48,7 +49,7 @@ EasyAgent4j is a Java framework for building AI agents with multi-turn conversat
 │  │       ▼                                                     │   │
 │  │  ┌─────────────────────────────────────────────────────┐   │   │
 │  │  │                 AgentContext                        │   │   │
-│  │  │      Messages + Attributes + SessionId              │   │   │
+│  │  │ Messages + Attributes + Session Tree Metadata       │   │   │
 │  │  └─────────────────────────────────────────────────────┘   │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                      │                                            │
@@ -68,10 +69,10 @@ EasyAgent4j is a Java framework for building AI agents with multi-turn conversat
 │                      │                                            │
 │       ┌──────────────┼──────────────┐                             │
 │       ▼              ▼              ▼                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐                    │
-│  │MemoryStore│  │Personality│  │TaskPlanner   │                    │
-│  │ (Memory)  │  │(Soul)    │  │ (Autonomous) │                    │
-│  └──────────┘  └──────────┘  └──────────────┘                    │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │MemoryStore│  │Personality│  │TaskPlanner   │  │ SessionTree  │  │
+│  │ (Memory)  │  │(Soul)    │  │ (Autonomous) │  │ + SubAgent   │  │
+│  └──────────┘  └──────────┘  └──────────────┘  └──────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -188,21 +189,28 @@ easyagent:
 ```java
 @Component
 public class WeatherTool extends AbstractAgentTool {
+    @Override
+    public String getName() { return "get_weather"; }
 
     @Override
-    public String getName() {
-        return "get_weather";
+    public String getDescription() { return "Get current weather for a city"; }
+
+    @Override
+    public String getParameterSchema() {
+        return """
+            {
+              "type": "object",
+              "properties": {
+                "city": { "type": "string" }
+              },
+              "required": ["city"]
+            }
+            """;
     }
 
     @Override
-    public String getDescription() {
-        return "Get current weather for a city";
-    }
-
-    @Override
-    public ToolResult execute(ToolCall toolCall, ToolContext context) {
-        String city = parseArgument(toolCall, "city");
-        // Call weather API...
+    protected ToolResult doExecute(ToolContext context) {
+        String city = context.getStringArg("city");
         return ToolResult.success("Weather in " + city + ": Sunny, 25°C");
     }
 }
@@ -218,8 +226,9 @@ public class ChatController {
     private Agent agent;
 
     @GetMapping("/chat")
-    public String chat(@RequestParam String message) {
-        return agent.chat(message);
+    public String chat(@RequestParam String message) throws Exception {
+        AgentContext context = agent.prompt(message).get();
+        return context.getLastMessage().getContent().toString();
     }
     
     // Runtime provider switching
@@ -230,6 +239,101 @@ public class ChatController {
     }
 }
 ```
+
+## Session Tree And Sub-Agent
+
+EasyAgent4j now supports session branching and isolated sub-agents.
+
+```java
+Agent root = new Agent(
+    AgentConfig.builder().sessionId("root-session").build(),
+    chatModel
+);
+
+root.setMemoryStore(new FileMemoryStore("./agent-memory", root.getContext().getSessionId()));
+root.addTool(new SubAgentTool(root));
+
+Agent child = root.spawnSubAgent("root-session/research-1", true);
+child.prompt("请在隔离上下文里完成技术调研").get();
+
+System.out.println(child.getContext().getParentSessionId()); // root-session
+System.out.println(child.getContext().getRootSessionId());   // root-session
+System.out.println(root.getSessionTree().getChildren("root-session"));
+```
+
+Built-in `sub_agent` tool:
+
+```json
+{
+  "task": "请单独分析这个模块的重构方案",
+  "childSessionId": "root-session/refactor-1",
+  "inheritMessages": true
+}
+```
+
+Related example:
+- `easyagent4j-example-tools/src/main/java/com/easyagent4j/example/SessionTreeExample.java`
+
+Web example endpoints:
+- `POST /api/chat` with `session_id`
+- `POST /api/sessions/sub-agent` with `parent_session_id`, `session_id`, `inherit_messages`
+- `GET /api/sessions/{sessionId}/tree`
+
+### Web Session Tree API Example
+
+Start the web example first:
+
+```bash
+mvn -pl easyagent4j-examples/easyagent4j-example-web spring-boot:run
+```
+
+Open the built-in demo page:
+
+```text
+http://localhost:8080/
+```
+
+Create or continue a root session:
+
+```bash
+curl -X POST http://localhost:8080/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "session_id": "demo-root",
+    "message": "请先总结主任务，再给我一个下一步建议"
+  }'
+```
+
+Spawn a sub-agent with isolated context:
+
+```bash
+curl -X POST http://localhost:8080/api/sessions/sub-agent \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "parent_session_id": "demo-root",
+    "session_id": "demo-root/research-1",
+    "inherit_messages": true,
+    "message": "请在隔离上下文中只做技术调研，不要改写主任务结论"
+  }'
+```
+
+Query the current session tree metadata:
+
+```bash
+curl http://localhost:8080/api/sessions/demo-root/tree
+```
+
+SSE streaming with a fixed session:
+
+```bash
+curl -N 'http://localhost:8080/api/chat/stream?query=%E8%AF%B7%E6%B5%81%E5%BC%8F%E5%9B%9E%E5%A4%8D%E5%BD%93%E5%89%8D%E8%BF%9B%E5%BA%A6&session_id=demo-root'
+```
+
+Typical response fields:
+- `session_id`: current node id
+- `parent_session_id`: parent node id, null for root
+- `root_session_id`: root node id
+- `child_session_ids`: current node's direct children
 
 ## Multi-Model Provider Configuration
 
@@ -372,9 +476,10 @@ AgentConfig config = AgentConfig.builder()
     .build();
 
 Agent agent = new Agent(config, chatModel);
-agent.registerTool(myTool);
+agent.addTool(myTool);
 
-String response = agent.chat("What's the weather in Beijing?");
+AgentContext context = agent.prompt("What's the weather in Beijing?").get();
+String response = context.getLastMessage().getContent().toString();
 ```
 
 ### Tools
@@ -393,8 +498,21 @@ public class CalculatorTool extends AbstractAgentTool {
     public String getDescription() { return "Perform mathematical calculations"; }
     
     @Override
-    public ToolResult execute(ToolCall toolCall, ToolContext context) {
-        String expression = parseArgument(toolCall, "expression");
+    public String getParameterSchema() {
+        return """
+            {
+              "type": "object",
+              "properties": {
+                "expression": { "type": "string" }
+              },
+              "required": ["expression"]
+            }
+            """;
+    }
+    
+    @Override
+    protected ToolResult doExecute(ToolContext context) {
+        String expression = context.getStringArg("expression");
         double result = evaluate(expression);
         return ToolResult.success(String.valueOf(result));
     }
@@ -406,19 +524,15 @@ public class CalculatorTool extends AbstractAgentTool {
 File-based persistent memory supporting long-term, short-term, and user preferences:
 
 ```java
-// Configure memory
-MemoryConfig memoryConfig = MemoryConfig.builder()
-    .basePath("./agent-memory")
-    .enabled(true)
-    .autoConsolidate(false)
-    .build();
-
 AgentConfig config = AgentConfig.builder()
-    .memory(memoryConfig)
+    .memory(new AgentConfig.MemoryConfig("./agent-memory", true, false))
     .build();
 
-// The agent automatically saves interactions and retrieves relevant memories
-String response = agent.chat("Remember that I prefer Python for data analysis");
+Agent agent = new Agent(config, chatModel);
+agent.setMemoryStore(new FileMemoryStore("./agent-memory", agent.getContext().getSessionId()));
+
+AgentContext context = agent.prompt("Remember that I prefer Python for data analysis").get();
+String response = context.getLastMessage().getContent().toString();
 ```
 
 Memory types:
@@ -481,9 +595,9 @@ AgentConfig config = AgentConfig.builder()
     .build();
 
 Agent agent = new Agent(config, chatModel);
-agent.registerTool(myTool);
+agent.addTool(myTool);
 
-String result = agent.chat("Analyze recent sales data and generate a report");
+AgentContext result = agent.executeAutonomous("Analyze recent sales data and generate a report").get();
 // Agent automatically breaks down the task, executes tools, and generates report
 ```
 

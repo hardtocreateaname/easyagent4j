@@ -112,7 +112,7 @@ public class MetricsEventListener implements AgentEventListener {
     }
 
     private String getSessionId(AgentEvent event) {
-        String sessionId = event.getContext().getSessionId();
+        String sessionId = event.getSessionId();
         return sessionId != null ? sessionId : "default";
     }
 }

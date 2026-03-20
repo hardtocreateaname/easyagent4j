@@ -41,6 +41,19 @@ public class AgentConfig {
     public RetryPolicy getRetryPolicy() { return retryPolicy; }
     public boolean isAutonomousMode() { return autonomousMode; }
 
+    public Builder toBuilder() {
+        return new Builder()
+            .systemPrompt(systemPrompt)
+            .maxToolIterations(maxToolIterations)
+            .toolExecutionMode(toolExecutionMode)
+            .streamingEnabled(streamingEnabled)
+            .sessionId(sessionId)
+            .personality(personality)
+            .memory(memory)
+            .retryPolicy(retryPolicy)
+            .autonomousMode(autonomousMode);
+    }
+
     /**
      * 应用system prompt覆盖（由转向机制使用）。
      */

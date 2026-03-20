@@ -23,17 +23,19 @@ import java.util.stream.Collectors;
  *   memory.md          — 长期记忆（Markdown格式）
  *   preferences.json   — 用户偏好（JSON）
  */
-public class FileMemoryStore implements MemoryStore {
+public class FileMemoryStore implements ForkableMemoryStore {
     private static final Logger log = LoggerFactory.getLogger(FileMemoryStore.class);
 
     private static final String MEMORY_FILE = "memory.md";
     private static final String PREFERENCES_FILE = "preferences.json";
 
+    private final Path storageRoot;
     private final Path basePath;
     private final String sessionId;
 
     public FileMemoryStore(String basePath, String sessionId) {
-        this.basePath = Paths.get(basePath, sessionId);
+        this.storageRoot = Paths.get(basePath);
+        this.basePath = storageRoot.resolve(sessionId);
         this.sessionId = sessionId;
         initDirectories();
     }
@@ -249,5 +251,15 @@ public class FileMemoryStore implements MemoryStore {
         }
         sb.append("}");
         return sb.toString();
+    }
+
+    @Override
+    public MemoryStore fork(String sessionId) {
+        return new FileMemoryStore(storageRoot.toString(), sessionId);
+    }
+
+    @Override
+    public String getSessionId() {
+        return sessionId;
     }
 }

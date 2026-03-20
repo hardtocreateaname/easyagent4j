@@ -13,8 +13,11 @@ import com.easyagent4j.core.provider.LlmProvider;
 import com.easyagent4j.core.provider.LlmProviderRegistry;
 import com.easyagent4j.core.provider.ProviderChatModelAdapter;
 import com.easyagent4j.core.resilience.RetryPolicy;
+import com.easyagent4j.core.tool.AgentTool;
 import com.easyagent4j.core.tool.ToolExecutionMode;
+import com.easyagent4j.core.tool.builtin.SubAgentTool;
 import com.easyagent4j.spring.chat.SpringAiChatModelAdapter;
+import com.easyagent4j.spring.agent.AgentSessionManager;
 import com.easyagent4j.spring.observability.AgentMetrics;
 import com.easyagent4j.spring.observability.DefaultAgentMetrics;
 import com.easyagent4j.spring.observability.MetricsEventListener;
@@ -30,6 +33,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
 import java.nio.file.Paths;
 import java.util.Optional;
 
@@ -183,12 +187,19 @@ public class EasyAgentAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(Agent.class)
     public Agent agent(AgentConfig config, ChatModel chatModel,
-                        Optional<MemoryStore> memoryStore, Optional<AgentPersonality> agentPersonality) {
+                        Optional<MemoryStore> memoryStore,
+                        Optional<AgentPersonality> agentPersonality,
+                        Optional<List<AgentTool>> tools,
+                        Optional<List<AgentEventListener>> listeners) {
         Agent agent = new Agent(config, chatModel);
 
         // 注入memory store
         if (config.getMemory() != null && config.getMemory().isEnabled() && memoryStore.isPresent()) {
-            agent.setMemoryStore(memoryStore.get());
+            MemoryStore scopedStore = memoryStore.get();
+            if (scopedStore instanceof com.easyagent4j.core.memory.ForkableMemoryStore forkableMemoryStore) {
+                scopedStore = forkableMemoryStore.fork(agent.getContext().getSessionId());
+            }
+            agent.setMemoryStore(scopedStore);
             log.info("MemoryStore configured for agent");
         }
 
@@ -198,7 +209,34 @@ public class EasyAgentAutoConfiguration {
             log.info("AgentPersonality configured for agent: {}", agentPersonality.get().getName());
         }
 
+        for (AgentTool tool : tools.orElse(List.of())) {
+            agent.addTool(tool);
+        }
+        agent.addTool(new SubAgentTool(agent));
+
+        for (AgentEventListener listener : listeners.orElse(List.of())) {
+            agent.subscribe(listener);
+        }
+
         return agent;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgentSessionManager agentSessionManager(AgentConfig config,
+                                                   ChatModel chatModel,
+                                                   Optional<MemoryStore> memoryStore,
+                                                   Optional<AgentPersonality> agentPersonality,
+                                                   Optional<List<com.easyagent4j.core.tool.AgentTool>> tools,
+                                                   Optional<List<AgentEventListener>> listeners) {
+        return new AgentSessionManager(
+            config,
+            chatModel,
+            memoryStore,
+            agentPersonality,
+            tools.orElse(List.of()),
+            listeners.orElse(List.of())
+        );
     }
 
     /**

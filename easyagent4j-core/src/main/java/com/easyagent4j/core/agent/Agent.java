@@ -13,6 +13,7 @@ import com.easyagent4j.core.event.events.AgentStartEvent;
 import com.easyagent4j.core.exception.AgentAbortException;
 import com.easyagent4j.core.memory.MemoryPromptBuilder;
 import com.easyagent4j.core.memory.MemoryStore;
+import com.easyagent4j.core.memory.ForkableMemoryStore;
 import com.easyagent4j.core.message.AgentMessage;
 import com.easyagent4j.core.message.ContentPart;
 import com.easyagent4j.core.message.UserMessage;
@@ -23,12 +24,14 @@ import com.easyagent4j.core.task.DefaultTaskPlanner;
 import com.easyagent4j.core.task.TaskPlanner;
 import com.easyagent4j.core.tool.AgentTool;
 import com.easyagent4j.core.tool.ToolHook;
+import com.easyagent4j.core.tool.builtin.SubAgentTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -49,21 +52,35 @@ public class Agent {
     private final AgentContext context;
     private final AgentEventPublisher eventPublisher;
     private final AgentSteering steering;
+    private final AgentSessionTree sessionTree;
     private AgentLoop loop;
     private volatile AgentState state = AgentState.IDLE;
     private MemoryStore memoryStore;
     private AgentPersonality personality;
 
     public Agent(AgentConfig config, ChatModel chatModel) {
+        this(config, chatModel, createRootContext(config), null);
+    }
+
+    private Agent(AgentConfig config, ChatModel chatModel, AgentContext context, AgentSessionTree existingSessionTree) {
         this.config = config;
         this.chatModel = chatModel;
         this.tools = new CopyOnWriteArrayList<>();
         this.transformer = msg -> msg; // identity
         this.converter = new DefaultMessageConverter();
-        this.context = new AgentContext(config.getSessionId());
+        this.context = context;
         this.eventPublisher = new AgentEventPublisher();
         this.steering = new AgentSteering();
+        this.sessionTree = existingSessionTree != null ? existingSessionTree : new AgentSessionTree(context.getRootSessionId());
+        if (existingSessionTree == null) {
+            this.sessionTree.createRoot(context.getSessionId());
+        }
         this.loop = createLoop();
+    }
+
+    private static AgentContext createRootContext(AgentConfig config) {
+        String sessionId = config.getSessionId() != null ? config.getSessionId() : "session-" + UUID.randomUUID();
+        return new AgentContext(sessionId, null, sessionId, 0);
     }
 
     private AgentLoop createLoop() {
@@ -189,13 +206,23 @@ public class Agent {
     }
 
     /**
-     * 转向：用新消息改变Agent的执行方向。
-     * 设置新的system prompt，AgentLoop在下一轮循环开始时检测并应用。
+     * 转向：用一条高优先级用户消息改变Agent的执行方向。
+     * AgentLoop会在当前轮次完成后优先消费该消息。
      *
-     * @param message 新的system prompt内容
+     * @param message 转向消息
      */
     public void steer(String message) {
         steering.steer(message);
+    }
+
+    /**
+     * 添加一条普通后续消息。
+     * 仅当当前轮没有工具调用且不存在待处理steering消息时才会消费。
+     *
+     * @param message 后续消息
+     */
+    public void followUp(String message) {
+        steering.followUp(message);
     }
 
     /**
@@ -251,6 +278,55 @@ public class Agent {
     }
 
     /**
+     * 从当前Agent派生一个子Agent。
+     * 子Agent默认复制当前消息快照，但之后的上下文互相隔离。
+     */
+    public Agent spawnSubAgent() {
+        return spawnSubAgent(true);
+    }
+
+    public Agent spawnSubAgent(boolean inheritMessages) {
+        String childSessionId = context.getSessionId() + "/child-" + UUID.randomUUID();
+        return spawnSubAgent(childSessionId, inheritMessages);
+    }
+
+    public Agent spawnSubAgent(String childSessionId, boolean inheritMessages) {
+        if (childSessionId == null || childSessionId.isBlank()) {
+            throw new IllegalArgumentException("childSessionId cannot be blank");
+        }
+
+        AgentContext childContext = context.fork(childSessionId, inheritMessages);
+        sessionTree.createChild(context.getSessionId(), childSessionId, inheritMessages);
+
+        AgentConfig childConfig = config.toBuilder()
+            .sessionId(childSessionId)
+            .build();
+
+        Agent child = new Agent(childConfig, chatModel, childContext, sessionTree);
+        child.setTools(copyToolsForChild(child));
+        child.setTransformer(transformer);
+        child.setConverter(converter);
+        child.setToolHook(toolHook);
+        child.setPersonality(personality);
+        if (memoryStore instanceof ForkableMemoryStore forkableMemoryStore) {
+            child.setMemoryStore(forkableMemoryStore.fork(childSessionId));
+        }
+        return child;
+    }
+
+    private List<AgentTool> copyToolsForChild(Agent child) {
+        List<AgentTool> copiedTools = new ArrayList<>();
+        for (AgentTool tool : tools) {
+            if (tool instanceof SubAgentTool subAgentTool) {
+                copiedTools.add(subAgentTool.bindTo(child));
+            } else {
+                copiedTools.add(tool);
+            }
+        }
+        return copiedTools;
+    }
+
+    /**
      * 设置记忆存储。
      */
     public void setMemoryStore(MemoryStore memoryStore) {
@@ -284,6 +360,7 @@ public class Agent {
     public AgentState getState() { return state; }
     public AgentConfig getConfig() { return config; }
     public List<AgentMessage> getMessages() { return context.getMessages(); }
+    public AgentSessionTree getSessionTree() { return sessionTree; }
 
     // === 事件 ===
 

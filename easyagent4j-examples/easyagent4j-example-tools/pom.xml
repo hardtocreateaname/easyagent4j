@@ -16,6 +16,11 @@
     <dependencies>
         <dependency>
             <groupId>com.easyagent4j</groupId>
+            <artifactId>easyagent4j-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.easyagent4j</groupId>
             <artifactId>easyagent4j-spring-boot-starter</artifactId>
         </dependency>
 

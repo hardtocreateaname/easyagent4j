@@ -1,6 +1,7 @@
 package com.easyagent4j.example.web.controller;
 
 import com.easyagent4j.core.agent.Agent;
+import com.easyagent4j.core.agent.AgentSessionNode;
 import com.easyagent4j.core.event.AgentEvent;
 import com.easyagent4j.core.event.AgentEventListener;
 import com.easyagent4j.core.event.events.MessageUpdateEvent;
@@ -10,6 +11,7 @@ import com.easyagent4j.core.event.events.ErrorEvent;
 import com.easyagent4j.core.context.AgentContext;
 import com.easyagent4j.example.web.model.ChatRequest;
 import com.easyagent4j.example.web.model.ChatResponse;
+import com.easyagent4j.spring.agent.AgentSessionManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +40,9 @@ public class ChatController {
     @Autowired
     private Agent agent;
 
+    @Autowired
+    private AgentSessionManager agentSessionManager;
+
     /**
      * POST /api/chat — 同步对话（返回完整回复JSON）。
      */
@@ -50,14 +55,16 @@ public class ChatController {
         long startTime = System.currentTimeMillis();
 
         try {
+            Agent currentAgent = resolveAgent(request.getSessionId());
+
             // 可选：设置system prompt
             if (request.getSystemPrompt() != null && !request.getSystemPrompt().isBlank()) {
-                agent.setSystemPrompt(request.getSystemPrompt());
+                currentAgent.setSystemPrompt(request.getSystemPrompt());
             }
 
             // 记录工具调用
             List<ChatResponse.ToolCallInfo> toolCalls = new ArrayList<>();
-            agent.subscribe(event -> {
+            currentAgent.subscribe(event -> {
                 if (event instanceof ToolExecutionStartEvent e) {
                     toolCalls.add(new ChatResponse.ToolCallInfo(
                             e.getToolCall().getName(),
@@ -76,7 +83,7 @@ public class ChatController {
             });
 
             // 执行Agent
-            CompletableFuture<AgentContext> future = agent.prompt(request.getMessage());
+            CompletableFuture<AgentContext> future = currentAgent.prompt(request.getMessage());
             AgentContext ctx = future.get(60, TimeUnit.SECONDS);
 
             long elapsed = System.currentTimeMillis() - startTime;
@@ -88,6 +95,7 @@ public class ChatController {
             }
 
             ChatResponse response = ChatResponse.success(reply, ctx.getSessionId(), elapsed);
+            enrichSessionMetadata(currentAgent, response);
             if (!toolCalls.isEmpty()) {
                 response.setToolCalls(toolCalls);
             }
@@ -107,16 +115,17 @@ public class ChatController {
     public SseEmitter streamChat(@RequestParam("query") String query,
                                   @RequestParam(value = "session_id", required = false) String sessionId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        Agent currentAgent = resolveAgent(sessionId);
 
         try {
             // 发送连接确认
             emitter.send(SseEmitter.event()
                     .name("connected")
                     .data("{\"status\":\"connected\",\"session_id\":\""
-                            + (sessionId != null ? sessionId : agent.getContext().getSessionId()) + "\"}"));
+                            + currentAgent.getContext().getSessionId() + "\"}"));
 
             // 注册事件监听器，实时推送SSE事件
-            agent.subscribe(new AgentEventListener() {
+            currentAgent.subscribe(new AgentEventListener() {
                 @Override
                 public void onEvent(AgentEvent event) {
                     try {
@@ -145,7 +154,7 @@ public class ChatController {
             });
 
             // 异步执行Agent
-            agent.prompt(query).whenComplete((ctx, ex) -> {
+            currentAgent.prompt(query).whenComplete((ctx, ex) -> {
                 try {
                     if (ex != null) {
                         emitter.send(SseEmitter.event()
@@ -181,13 +190,14 @@ public class ChatController {
         long startTime = System.currentTimeMillis();
 
         try {
+            Agent currentAgent = resolveAgent(request.getSessionId());
             if (request.getSystemPrompt() != null && !request.getSystemPrompt().isBlank()) {
-                agent.setSystemPrompt(request.getSystemPrompt());
+                currentAgent.setSystemPrompt(request.getSystemPrompt());
             }
 
             // 记录工具调用详情
             List<ChatResponse.ToolCallInfo> toolCalls = new ArrayList<>();
-            agent.subscribe(event -> {
+            currentAgent.subscribe(event -> {
                 if (event instanceof ToolExecutionStartEvent e) {
                     toolCalls.add(new ChatResponse.ToolCallInfo(
                             e.getToolCall().getName(),
@@ -196,7 +206,7 @@ public class ChatController {
                 }
             });
 
-            CompletableFuture<AgentContext> future = agent.prompt(request.getMessage());
+            CompletableFuture<AgentContext> future = currentAgent.prompt(request.getMessage());
             AgentContext ctx = future.get(60, TimeUnit.SECONDS);
 
             long elapsed = System.currentTimeMillis() - startTime;
@@ -204,6 +214,7 @@ public class ChatController {
                     ? ctx.getLastMessage().getContent().toString() : "";
 
             ChatResponse response = ChatResponse.success(reply, ctx.getSessionId(), elapsed);
+            enrichSessionMetadata(currentAgent, response);
             response.setToolCalls(toolCalls);
             return response;
         } catch (Exception e) {
@@ -220,6 +231,42 @@ public class ChatController {
         return ChatResponse.healthOk();
     }
 
+    @PostMapping("/sessions/sub-agent")
+    public ChatResponse spawnSubAgent(@RequestBody ChatRequest request) {
+        if (request.getParentSessionId() == null || request.getParentSessionId().isBlank()) {
+            return ChatResponse.error("parent_session_id 不能为空");
+        }
+        if (request.getMessage() == null || request.getMessage().isBlank()) {
+            return ChatResponse.error("消息不能为空");
+        }
+
+        long startTime = System.currentTimeMillis();
+        try {
+            String childSessionId = request.getSessionId();
+            boolean inheritMessages = !Boolean.FALSE.equals(request.getInheritMessages());
+            Agent child = agentSessionManager.spawnSubAgent(request.getParentSessionId(), childSessionId, inheritMessages);
+            AgentContext ctx = child.prompt(request.getMessage()).get(60, TimeUnit.SECONDS);
+
+            String reply = ctx.getLastMessage() != null && ctx.getLastMessage().getContent() != null
+                ? ctx.getLastMessage().getContent().toString()
+                : "";
+            ChatResponse response = ChatResponse.success(reply, ctx.getSessionId(), System.currentTimeMillis() - startTime);
+            enrichSessionMetadata(child, response);
+            return response;
+        } catch (Exception e) {
+            log.error("Spawn sub-agent error", e);
+            return ChatResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/sessions/{sessionId}/tree")
+    public ChatResponse sessionTree(@PathVariable("sessionId") String sessionId) {
+        Agent currentAgent = resolveAgent(sessionId);
+        ChatResponse response = ChatResponse.success("ok", currentAgent.getContext().getSessionId(), 0);
+        enrichSessionMetadata(currentAgent, response);
+        return response;
+    }
+
     /**
      * 简单的JSON字符串转义。
      */
@@ -230,5 +277,20 @@ public class ChatController {
                    .replace("\n", "\\n")
                    .replace("\r", "\\r")
                    .replace("\t", "\\t");
+    }
+
+    private Agent resolveAgent(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return agent;
+        }
+        return agentSessionManager.getOrCreateRootAgent(sessionId);
+    }
+
+    private void enrichSessionMetadata(Agent currentAgent, ChatResponse response) {
+        response.setParentSessionId(currentAgent.getContext().getParentSessionId());
+        response.setRootSessionId(currentAgent.getContext().getRootSessionId());
+        currentAgent.getSessionTree().getNode(currentAgent.getContext().getSessionId())
+            .map(AgentSessionNode::getChildSessionIds)
+            .ifPresent(response::setChildSessionIds);
     }
 }

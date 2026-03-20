@@ -20,6 +20,15 @@ public class ChatResponse {
     @JsonProperty("tool_calls")
     private List<ToolCallInfo> toolCalls;
 
+    @JsonProperty("parent_session_id")
+    private String parentSessionId;
+
+    @JsonProperty("root_session_id")
+    private String rootSessionId;
+
+    @JsonProperty("child_session_ids")
+    private List<String> childSessionIds;
+
     @JsonProperty("status")
     private String status;
 
@@ -64,6 +73,12 @@ public class ChatResponse {
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
     public List<ToolCallInfo> getToolCalls() { return toolCalls; }
     public void setToolCalls(List<ToolCallInfo> toolCalls) { this.toolCalls = toolCalls; }
+    public String getParentSessionId() { return parentSessionId; }
+    public void setParentSessionId(String parentSessionId) { this.parentSessionId = parentSessionId; }
+    public String getRootSessionId() { return rootSessionId; }
+    public void setRootSessionId(String rootSessionId) { this.rootSessionId = rootSessionId; }
+    public List<String> getChildSessionIds() { return childSessionIds; }
+    public void setChildSessionIds(List<String> childSessionIds) { this.childSessionIds = childSessionIds; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getError() { return error; }
