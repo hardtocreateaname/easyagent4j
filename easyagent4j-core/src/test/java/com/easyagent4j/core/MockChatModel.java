@@ -78,23 +78,24 @@ public class MockChatModel implements ChatModel {
             while ((chunk = streamChunks.poll()) != null) {
                 callback.accept(chunk);
             }
-            return;
-        }
-        // 如果没有预设流式块，从非流式响应模拟
-        ChatResponse response = responses.poll();
-        if (response != null) {
-            String text = response.getText();
-            if (text != null && !text.isEmpty()) {
-                // 模拟一个完整的流式响应
-                callback.accept(new ChatResponseChunk(text));
-            }
-            // 模拟工具调用
-            if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
-                ChatResponseChunk tcChunk = new ChatResponseChunk();
-                // ChatResponseChunk没有setToolCalls，但getToolCalls返回null
-                // 流式模式下的工具调用通过最终的chunk传递
-                callback.accept(tcChunk);
+        } else {
+            // 如果没有预设流式块，从非流式响应模拟
+            ChatResponse response = responses.poll();
+            if (response != null) {
+                String text = response.getText();
+                if (text != null && !text.isEmpty()) {
+                    callback.accept(new ChatResponseChunk(text));
+                }
+                if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
+                    ChatResponseChunk tcChunk = new ChatResponseChunk();
+                    tcChunk.setToolCalls(response.getToolCalls());
+                    callback.accept(tcChunk);
+                }
             }
         }
+        // 发送完成标记
+        ChatResponseChunk finishedChunk = new ChatResponseChunk();
+        finishedChunk.setFinished(true);
+        callback.accept(finishedChunk);
     }
 }
