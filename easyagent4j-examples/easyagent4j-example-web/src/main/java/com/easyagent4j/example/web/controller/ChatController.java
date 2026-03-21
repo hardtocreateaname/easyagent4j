@@ -6,7 +6,10 @@ import com.easyagent4j.core.event.AgentEvent;
 import com.easyagent4j.core.event.AgentEventListener;
 import com.easyagent4j.core.event.events.MessageUpdateEvent;
 import com.easyagent4j.core.event.events.ToolExecutionStartEvent;
+import com.easyagent4j.core.event.events.ToolExecutionUpdateEvent;
 import com.easyagent4j.core.event.events.ToolExecutionEndEvent;
+import com.easyagent4j.core.event.events.TurnStartEvent;
+import com.easyagent4j.core.event.events.TurnEndEvent;
 import com.easyagent4j.core.event.events.ErrorEvent;
 import com.easyagent4j.core.context.AgentContext;
 import com.easyagent4j.example.web.model.ChatRequest;
@@ -37,7 +40,7 @@ public class ChatController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final long SSE_TIMEOUT_MS = 60_000;
+    private static final long SSE_TIMEOUT_MS = 300_000; // 5分钟，工具调用场景需要更长超时
 
     @Autowired
     private Agent agent;
@@ -157,11 +160,24 @@ public class ChatController {
                             emitter.send(SseEmitter.event()
                                     .name("message")
                                     .data("{\"delta\":\"" + escapeJson(e.getDelta()) + "\"}"));
+                        } else if (event instanceof TurnStartEvent) {
+                            emitter.send(SseEmitter.event()
+                                    .name("turn_start")
+                                    .data("{\"status\":\"thinking\"}"));
+                        } else if (event instanceof TurnEndEvent) {
+                            emitter.send(SseEmitter.event()
+                                    .name("turn_end")
+                                    .data("{\"status\":\"turn_completed\"}"));
                         } else if (event instanceof ToolExecutionStartEvent e) {
                             emitter.send(SseEmitter.event()
                                     .name("tool_start")
                                     .data("{\"name\":\"" + escapeJson(e.getToolCall().getName())
                                             + "\",\"arguments\":\"" + escapeJson(e.getToolCall().getArguments()) + "\"}"));
+                        } else if (event instanceof ToolExecutionUpdateEvent e) {
+                            emitter.send(SseEmitter.event()
+                                    .name("tool_update")
+                                    .data("{\"name\":\"" + escapeJson(e.getToolCall().getName())
+                                            + "\",\"progress\":\"" + escapeJson(e.getProgress()) + "\"}"));
                         } else if (event instanceof ToolExecutionEndEvent e) {
                             emitter.send(SseEmitter.event()
                                     .name("tool_end")
@@ -175,6 +191,10 @@ public class ChatController {
                         closed.set(true);
                         currentAgent.unsubscribe(this);
                         emitter.completeWithError(ex);
+                    } catch (IllegalStateException ex) {
+                        // emitter已经completed，静默忽略
+                        closed.set(true);
+                        currentAgent.unsubscribe(this);
                     }
                 }
             };
@@ -195,10 +215,12 @@ public class ChatController {
 
             // 异步执行Agent
             currentAgent.prompt(query).whenComplete((ctx, ex) -> {
+                if (closed.get()) {
+                    return;
+                }
+                closed.set(true);
+                currentAgent.unsubscribe(listener);
                 try {
-                    if (closed.get()) {
-                        return;
-                    }
                     if (ex != null) {
                         emitter.send(SseEmitter.event()
                                 .name("done")
@@ -209,8 +231,8 @@ public class ChatController {
                                 .data("{\"status\":\"done\",\"session_id\":\"" + ctx.getSessionId() + "\"}"));
                     }
                     emitter.complete();
-                } catch (IOException e) {
-                    emitter.completeWithError(e);
+                } catch (IOException | IllegalStateException e) {
+                    try { emitter.completeWithError(e); } catch (Exception ignored) {}
                 }
             });
 

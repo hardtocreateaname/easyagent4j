@@ -15,6 +15,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.easyagent4j.core.resilience.RetryPolicy;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,10 +40,14 @@ class ParallelExecutionTest {
     }
 
     private AgentLoop createLoop(AgentConfig config, AgentSteering steering) {
+        return createLoop(config, steering, null);
+    }
+
+    private AgentLoop createLoop(AgentConfig config, AgentSteering steering, RetryPolicy retryPolicy) {
         MessageTransformer transformer = messages -> messages;
         MessageConverter converter = new DefaultMessageConverter();
         return new AgentLoop(mockChatModel, config, tools, transformer, converter,
-            null, eventPublisher, steering);
+            null, eventPublisher, steering, retryPolicy);
     }
 
     @Test
@@ -173,7 +180,9 @@ class ParallelExecutionTest {
             .streamingEnabled(false)
             .build();
 
-        AgentLoop loop = createLoop(config, null);
+        // 不重试，避免 FailingTool 的重试延迟拖慢测试
+        RetryPolicy noRetry = new RetryPolicy(0, Duration.ofMillis(100), 1.0);
+        AgentLoop loop = createLoop(config, null, noRetry);
         AgentContext context = new AgentContext("test-session");
 
         // 不应抛出异常
