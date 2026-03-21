@@ -3,16 +3,23 @@ package com.easyagent4j.providers.springai;
 import com.easyagent4j.core.chat.ChatResponseChunk;
 import com.easyagent4j.core.chat.Usage;
 import com.easyagent4j.core.message.AgentMessage;
+import com.easyagent4j.core.message.AssistantMessage;
+import com.easyagent4j.core.message.ToolResultMessage;
 import com.easyagent4j.core.message.ToolCall;
+import com.easyagent4j.core.tool.ToolDefinition;
 import com.easyagent4j.core.provider.LlmProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.function.FunctionToolCallback;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -57,7 +64,7 @@ public class SpringAiProviderAdapter implements LlmProvider {
     @Override
     public com.easyagent4j.core.chat.ChatResponse call(com.easyagent4j.core.chat.ChatRequest request) {
         List<Message> springMessages = convertMessages(request);
-        Prompt prompt = new Prompt(springMessages);
+        Prompt prompt = new Prompt(springMessages, buildChatOptions(request));
 
         org.springframework.ai.chat.model.ChatResponse springResponse = springChatModel.call(prompt);
         return convertResponse(springResponse);
@@ -66,7 +73,7 @@ public class SpringAiProviderAdapter implements LlmProvider {
     @Override
     public void stream(com.easyagent4j.core.chat.ChatRequest request, Consumer<ChatResponseChunk> callback) {
         List<Message> springMessages = convertMessages(request);
-        Prompt prompt = new Prompt(springMessages);
+        Prompt prompt = new Prompt(springMessages, buildChatOptions(request));
 
         // 使用AtomicReference跟踪已处理的文本长度，处理累积式流式响应
         // 某些模型（如智谱GLM）返回的流式chunk是累积内容而非增量内容
@@ -86,7 +93,8 @@ public class SpringAiProviderAdapter implements LlmProvider {
                 log.debug("Raw Spring AI chunk #{}: [{}]", count, rawContent);
                 
                 ChatResponseChunk result = convertChunkDelta(chunk, lastContent);
-                if (result.getText() != null && !result.getText().isEmpty()) {
+                if ((result.getText() != null && !result.getText().isEmpty())
+                    || (result.getToolCalls() != null && !result.getToolCalls().isEmpty())) {
                     log.debug("Sending delta: [{}]", result.getText());
                     callback.accept(result);
                 }
@@ -141,21 +149,73 @@ public class SpringAiProviderAdapter implements LlmProvider {
         return springMessages;
     }
 
+    private org.springframework.ai.chat.prompt.ChatOptions buildChatOptions(com.easyagent4j.core.chat.ChatRequest request) {
+        if (request.getTools() == null || request.getTools().isEmpty()) {
+            return null;
+        }
+
+        List<ToolCallback> callbacks = request.getTools().stream()
+            .map(this::toToolCallback)
+            .toList();
+
+        return DefaultToolCallingChatOptions.builder()
+            .toolCallbacks(callbacks)
+            .internalToolExecutionEnabled(false)
+            .build();
+    }
+
+    private ToolCallback toToolCallback(ToolDefinition tool) {
+        return FunctionToolCallback.<Map<String, Object>, String>builder(
+                tool.getName(),
+                input -> "Tool execution is handled by EasyAgent4j"
+            )
+            .description(tool.getDescription())
+            .inputType(Map.class)
+            .inputSchema(tool.getParameterSchema())
+            .build();
+    }
+
     /**
      * 转换单个消息。
      */
     private Optional<Message> convertMessage(Object msgObj) {
         if (msgObj instanceof Message) {
             return Optional.of((Message) msgObj);
+        } else if (msgObj instanceof Map<?, ?> mapMsg) {
+            String role = mapMsg.get("role") != null ? mapMsg.get("role").toString().toLowerCase() : "user";
+            String content = mapMsg.get("content") != null ? mapMsg.get("content").toString() : "";
+            return switch (role) {
+                case "user" -> Optional.of(new org.springframework.ai.chat.messages.UserMessage(content));
+                case "assistant" -> Optional.of(new org.springframework.ai.chat.messages.AssistantMessage(content));
+                case "system" -> Optional.of(new org.springframework.ai.chat.messages.SystemMessage(content));
+                default -> Optional.of(new org.springframework.ai.chat.messages.UserMessage(content));
+            };
         } else if (msgObj instanceof com.easyagent4j.core.message.UserMessage) {
             com.easyagent4j.core.message.UserMessage userMsg = (com.easyagent4j.core.message.UserMessage) msgObj;
             return Optional.of(new org.springframework.ai.chat.messages.UserMessage(userMsg.getTextContent()));
-        } else if (msgObj instanceof com.easyagent4j.core.message.AssistantMessage) {
-            com.easyagent4j.core.message.AssistantMessage assistantMsg = (com.easyagent4j.core.message.AssistantMessage) msgObj;
-            return Optional.of(new org.springframework.ai.chat.messages.AssistantMessage(assistantMsg.getTextContent()));
+        } else if (msgObj instanceof AssistantMessage assistantMsg) {
+            List<org.springframework.ai.chat.messages.AssistantMessage.ToolCall> toolCalls = assistantMsg.getToolCalls()
+                .stream()
+                .map(tc -> new org.springframework.ai.chat.messages.AssistantMessage.ToolCall(
+                    tc.getId(), "function", tc.getName(), tc.getArguments()))
+                .toList();
+            return Optional.of(org.springframework.ai.chat.messages.AssistantMessage.builder()
+                .content(assistantMsg.getTextContent())
+                .toolCalls(toolCalls)
+                .build());
         } else if (msgObj instanceof com.easyagent4j.core.message.SystemMessage) {
             com.easyagent4j.core.message.SystemMessage systemMsg = (com.easyagent4j.core.message.SystemMessage) msgObj;
             return Optional.of(new org.springframework.ai.chat.messages.SystemMessage(systemMsg.getTextContent()));
+        } else if (msgObj instanceof ToolResultMessage toolResultMsg) {
+            org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse toolResponse =
+                new org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse(
+                    toolResultMsg.getToolCall().getId(),
+                    toolResultMsg.getToolCall().getName(),
+                    toolResultMsg.getResultContent()
+                );
+            return Optional.of(org.springframework.ai.chat.messages.ToolResponseMessage.builder()
+                .responses(List.of(toolResponse))
+                .build());
         } else if (msgObj instanceof AgentMessage) {
             AgentMessage agentMsg = (AgentMessage) msgObj;
             String content = agentMsg.getContent() != null ? agentMsg.getContent().toString() : "";
@@ -163,6 +223,7 @@ public class SpringAiProviderAdapter implements LlmProvider {
                 case USER -> Optional.of(new org.springframework.ai.chat.messages.UserMessage(content));
                 case ASSISTANT -> Optional.of(new org.springframework.ai.chat.messages.AssistantMessage(content));
                 case SYSTEM -> Optional.of(new org.springframework.ai.chat.messages.SystemMessage(content));
+                case TOOL_RESULT -> Optional.empty();
                 default -> Optional.empty();
             };
         }
@@ -238,6 +299,10 @@ public class SpringAiProviderAdapter implements LlmProvider {
     private ChatResponseChunk convertChunkDelta(org.springframework.ai.chat.model.ChatResponse springChunk, 
                                                  AtomicReference<String> lastContentRef) {
         ChatResponseChunk chunk = new ChatResponseChunk();
+        List<ToolCall> toolCalls = extractToolCalls(springChunk);
+        if (!toolCalls.isEmpty()) {
+            chunk.setToolCalls(toolCalls);
+        }
         
         if (springChunk.getResult() != null && springChunk.getResult().getOutput() != null) {
             String currentContent = springChunk.getResult().getOutput().getText();

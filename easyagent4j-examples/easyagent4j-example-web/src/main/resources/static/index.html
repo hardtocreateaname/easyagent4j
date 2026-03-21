@@ -334,9 +334,31 @@
     const treeOutput = document.getElementById("treeOutput");
     const streamDot = document.getElementById("streamDot");
     const streamStatus = document.getElementById("streamStatus");
+    const apiBase = (() => {
+        if (window.location.protocol === "file:" || window.location.port === "63342") {
+            return "http://localhost:8080";
+        }
+        return window.location.origin;
+    })();
 
     function pretty(data) {
         return JSON.stringify(data, null, 2);
+    }
+
+    function apiUrl(path) {
+        return `${apiBase}${path}`;
+    }
+
+    async function parseJsonResponse(response) {
+        const text = await response.text();
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+        }
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            throw new Error(`Invalid JSON response: ${text.slice(0, 200)}`);
+        }
     }
 
     async function postJson(url, body) {
@@ -345,41 +367,53 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
         });
-        return response.json();
+        return parseJsonResponse(response);
     }
 
     document.getElementById("chatBtn").addEventListener("click", async () => {
-        const payload = {
-            session_id: document.getElementById("sessionId").value || null,
-            system_prompt: document.getElementById("systemPrompt").value || null,
-            message: document.getElementById("message").value
-        };
-        const data = await postJson("/api/chat", payload);
-        chatOutput.textContent = pretty(data);
+        try {
+            const payload = {
+                session_id: document.getElementById("sessionId").value || null,
+                system_prompt: document.getElementById("systemPrompt").value || null,
+                message: document.getElementById("message").value
+            };
+            const data = await postJson(apiUrl("/api/chat"), payload);
+            chatOutput.textContent = pretty(data);
+        } catch (error) {
+            chatOutput.textContent = String(error.message || error);
+        }
     });
 
     document.getElementById("subAgentBtn").addEventListener("click", async () => {
-        const payload = {
-            parent_session_id: document.getElementById("parentSessionId").value,
-            session_id: document.getElementById("childSessionId").value,
-            inherit_messages: true,
-            message: document.getElementById("subTask").value
-        };
-        const data = await postJson("/api/sessions/sub-agent", payload);
-        treeOutput.textContent = pretty(data);
+        try {
+            const payload = {
+                parent_session_id: document.getElementById("parentSessionId").value,
+                session_id: document.getElementById("childSessionId").value,
+                inherit_messages: true,
+                message: document.getElementById("subTask").value
+            };
+            const data = await postJson(apiUrl("/api/sessions/sub-agent"), payload);
+            treeOutput.textContent = pretty(data);
+        } catch (error) {
+            treeOutput.textContent = String(error.message || error);
+        }
     });
 
     document.getElementById("treeBtn").addEventListener("click", async () => {
-        const sessionId = document.getElementById("sessionId").value || document.getElementById("parentSessionId").value;
-        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tree`);
-        const data = await response.json();
-        treeOutput.textContent = pretty(data);
+        try {
+            const sessionId = document.getElementById("sessionId").value || document.getElementById("parentSessionId").value;
+            const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}/tree`));
+            const data = await parseJsonResponse(response);
+            treeOutput.textContent = pretty(data);
+        } catch (error) {
+            treeOutput.textContent = String(error.message || error);
+        }
     });
 
     document.getElementById("streamBtn").addEventListener("click", () => {
         const sessionId = document.getElementById("sessionId").value || "";
         const query = document.getElementById("message").value;
-        const url = `/api/chat/stream?query=${encodeURIComponent(query)}&session_id=${encodeURIComponent(sessionId)}`;
+        const url = apiUrl(`/api/chat/stream?query=${encodeURIComponent(query)}&session_id=${encodeURIComponent(sessionId)}`);
         chatOutput.textContent = "";
         streamDot.classList.add("live");
         streamStatus.textContent = "SSE connected";
@@ -396,6 +430,12 @@
                 }
             });
         });
+        source.onerror = () => {
+            streamDot.classList.remove("live");
+            streamStatus.textContent = "SSE error";
+            chatOutput.textContent += "[error] Unable to connect to stream endpoint\n";
+            source.close();
+        };
     });
 </script>
 </body>

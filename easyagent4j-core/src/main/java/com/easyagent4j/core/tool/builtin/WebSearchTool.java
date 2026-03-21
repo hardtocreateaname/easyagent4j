@@ -8,9 +8,10 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Web搜索工具 — 通过HTTP GET请求获取网页内容，模拟搜索功能。
@@ -18,6 +19,17 @@ import java.util.Set;
  * 支持配置允许访问的域名白名单。
  */
 public class WebSearchTool extends AbstractAgentTool {
+
+    private static final Pattern SCRIPT_STYLE_PATTERN =
+            Pattern.compile("(?is)<(script|style)[^>]*>.*?</\\1>");
+    private static final Pattern HTML_COMMENT_PATTERN =
+            Pattern.compile("(?is)<!--.*?-->");
+    private static final Pattern TITLE_PATTERN =
+            Pattern.compile("(?is)<title[^>]*>(.*?)</title>");
+    private static final Pattern TAG_PATTERN =
+            Pattern.compile("(?is)<[^>]+>");
+    private static final Pattern WHITESPACE_PATTERN =
+            Pattern.compile("[\\t\\x0B\\f\\r ]+");
 
     private final Set<String> allowedDomains;
     private final int maxContentLength;
@@ -29,8 +41,8 @@ public class WebSearchTool extends AbstractAgentTool {
      */
     public WebSearchTool() {
         super("web_search", "通过HTTP GET请求获取网页内容。可用于搜索和获取网络信息。");
-        this.allowedDomains = Set.of(); // 空集合表示允许所有域名
-        this.maxContentLength = 50000; // 最大50KB
+        this.allowedDomains = Set.of();
+        this.maxContentLength = 50000;
         this.connectTimeout = 5000;
         this.readTimeout = 10000;
     }
@@ -81,14 +93,12 @@ public class WebSearchTool extends AbstractAgentTool {
             return ToolResult.error("参数 url 不能为空");
         }
 
-        // URL合法性校验
         try {
             URI.create(urlStr).toURL();
         } catch (Exception e) {
             return ToolResult.error("无效的URL: " + urlStr);
         }
 
-        // 域名白名单检查
         if (!allowedDomains.isEmpty()) {
             String host = URI.create(urlStr).getHost();
             if (host == null || !allowedDomains.contains(host)) {
@@ -96,7 +106,6 @@ public class WebSearchTool extends AbstractAgentTool {
             }
         }
 
-        // 只允许HTTP/HTTPS
         String protocol = URI.create(urlStr).getScheme();
         if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
             return ToolResult.error("只允许 http/https 协议");
@@ -113,6 +122,7 @@ public class WebSearchTool extends AbstractAgentTool {
             conn.setRequestProperty("Accept", "text/html,text/plain,application/json,*/*");
 
             int responseCode = conn.getResponseCode();
+            String contentType = conn.getContentType();
             StringBuilder content = new StringBuilder();
 
             try (BufferedReader reader = new BufferedReader(
@@ -131,8 +141,8 @@ public class WebSearchTool extends AbstractAgentTool {
             }
 
             if (responseCode >= 200 && responseCode < 300) {
-                return ToolResult.success(
-                        "[HTTP " + responseCode + "]\n" + content.toString().trim());
+                return ToolResult.success("[HTTP " + responseCode + "]\n"
+                        + formatResponseBody(content.toString(), contentType, urlStr));
             } else {
                 return ToolResult.error(
                         "HTTP请求失败，状态码: " + responseCode + "\n" + content);
@@ -140,5 +150,84 @@ public class WebSearchTool extends AbstractAgentTool {
         } catch (Exception e) {
             return ToolResult.error("请求失败: " + e.getMessage());
         }
+    }
+
+    private String formatResponseBody(String content, String contentType, String url) {
+        String body = content == null ? "" : content.trim();
+        if (body.isEmpty()) {
+            return "";
+        }
+
+        String normalizedContentType = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+        if (normalizedContentType.contains("text/html") || looksLikeHtml(body)) {
+            return htmlToPlainText(body, url);
+        }
+        return truncate(body);
+    }
+
+    private boolean looksLikeHtml(String content) {
+        String sample = content.length() > 512 ? content.substring(0, 512) : content;
+        String lower = sample.toLowerCase(Locale.ROOT);
+        return lower.contains("<html") || lower.contains("<body") || lower.contains("<!doctype html");
+    }
+
+    private String htmlToPlainText(String html, String url) {
+        String title = extractTitle(html);
+        String text = SCRIPT_STYLE_PATTERN.matcher(html).replaceAll("\n");
+        text = HTML_COMMENT_PATTERN.matcher(text).replaceAll("\n");
+        text = text.replace("</p>", "\n")
+                .replace("</div>", "\n")
+                .replace("</li>", "\n")
+                .replace("</tr>", "\n")
+                .replace("</td>", " ")
+                .replace("<br>", "\n")
+                .replace("<br/>", "\n")
+                .replace("<br />", "\n");
+        text = TAG_PATTERN.matcher(text).replaceAll(" ");
+        text = decodeBasicEntities(text);
+        text = normalizeWhitespace(text);
+
+        StringBuilder result = new StringBuilder();
+        result.append("[URL] ").append(url).append("\n");
+        if (!title.isBlank()) {
+            result.append("[TITLE] ").append(title).append("\n");
+        }
+        result.append("[TEXT]\n").append(truncate(text));
+        return result.toString().trim();
+    }
+
+    private String extractTitle(String html) {
+        var matcher = TITLE_PATTERN.matcher(html);
+        if (!matcher.find()) {
+            return "";
+        }
+        return normalizeWhitespace(decodeBasicEntities(matcher.group(1)));
+    }
+
+    private String decodeBasicEntities(String text) {
+        return text.replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">");
+    }
+
+    private String normalizeWhitespace(String text) {
+        String normalized = text.replace('\uFEFF', ' ')
+                .replace("\r\n", "\n")
+                .replace('\r', '\n');
+        normalized = WHITESPACE_PATTERN.matcher(normalized).replaceAll(" ");
+        normalized = normalized.replaceAll("\\n\\s+", "\n");
+        normalized = normalized.replaceAll("\\n{3,}", "\n\n");
+        return normalized.trim();
+    }
+
+    private String truncate(String text) {
+        if (text.length() <= maxContentLength) {
+            return text;
+        }
+        return text.substring(0, maxContentLength)
+                + "\n... (内容已截断，最大 " + maxContentLength / 1024 + "KB)";
     }
 }

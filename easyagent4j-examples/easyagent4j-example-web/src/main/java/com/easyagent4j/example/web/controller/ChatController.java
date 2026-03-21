@@ -25,11 +25,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 聊天API控制器 — 提供REST和SSE流式对话接口。
  */
 @RestController
+@CrossOrigin(originPatterns = "*")
 @RequestMapping("/api")
 public class ChatController {
 
@@ -53,9 +55,11 @@ public class ChatController {
         }
 
         long startTime = System.currentTimeMillis();
+        Agent currentAgent = null;
+        AgentEventListener toolListener = null;
 
         try {
-            Agent currentAgent = resolveAgent(request.getSessionId());
+            currentAgent = resolveAgent(request.getSessionId());
 
             // 可选：设置system prompt
             if (request.getSystemPrompt() != null && !request.getSystemPrompt().isBlank()) {
@@ -64,7 +68,7 @@ public class ChatController {
 
             // 记录工具调用
             List<ChatResponse.ToolCallInfo> toolCalls = new ArrayList<>();
-            currentAgent.subscribe(event -> {
+            toolListener = event -> {
                 if (event instanceof ToolExecutionStartEvent e) {
                     toolCalls.add(new ChatResponse.ToolCallInfo(
                             e.getToolCall().getName(),
@@ -80,7 +84,8 @@ public class ChatController {
                         }
                     }
                 }
-            });
+            };
+            currentAgent.subscribe(toolListener);
 
             // 执行Agent
             CompletableFuture<AgentContext> future = currentAgent.prompt(request.getMessage());
@@ -103,6 +108,10 @@ public class ChatController {
         } catch (Exception e) {
             log.error("Chat error", e);
             return ChatResponse.error(e.getMessage());
+        } finally {
+            if (currentAgent != null && toolListener != null) {
+                currentAgent.unsubscribe(toolListener);
+            }
         }
     }
 
@@ -115,6 +124,17 @@ public class ChatController {
     public SseEmitter streamChat(@RequestParam("query") String query,
                                   @RequestParam(value = "session_id", required = false) String sessionId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        if (query == null || query.isBlank()) {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("error")
+                        .data("{\"error\":\"query 不能为空\"}"));
+                emitter.complete();
+            } catch (IOException e) {
+                emitter.completeWithError(e);
+            }
+            return emitter;
+        }
         Agent currentAgent = resolveAgent(sessionId);
 
         try {
@@ -125,9 +145,13 @@ public class ChatController {
                             + currentAgent.getContext().getSessionId() + "\"}"));
 
             // 注册事件监听器，实时推送SSE事件
-            currentAgent.subscribe(new AgentEventListener() {
+            AtomicBoolean closed = new AtomicBoolean(false);
+            AgentEventListener listener = new AgentEventListener() {
                 @Override
                 public void onEvent(AgentEvent event) {
+                    if (closed.get()) {
+                        return;
+                    }
                     try {
                         if (event instanceof MessageUpdateEvent e) {
                             emitter.send(SseEmitter.event()
@@ -148,14 +172,33 @@ public class ChatController {
                                     .data("{\"error\":\"" + escapeJson(e.getErrorMessage()) + "\"}"));
                         }
                     } catch (IOException ex) {
+                        closed.set(true);
+                        currentAgent.unsubscribe(this);
                         emitter.completeWithError(ex);
                     }
                 }
+            };
+            currentAgent.subscribe(listener);
+            emitter.onCompletion(() -> {
+                closed.set(true);
+                currentAgent.unsubscribe(listener);
+            });
+            emitter.onTimeout(() -> {
+                closed.set(true);
+                currentAgent.unsubscribe(listener);
+                emitter.complete();
+            });
+            emitter.onError(ex -> {
+                closed.set(true);
+                currentAgent.unsubscribe(listener);
             });
 
             // 异步执行Agent
             currentAgent.prompt(query).whenComplete((ctx, ex) -> {
                 try {
+                    if (closed.get()) {
+                        return;
+                    }
                     if (ex != null) {
                         emitter.send(SseEmitter.event()
                                 .name("done")
@@ -188,23 +231,26 @@ public class ChatController {
         }
 
         long startTime = System.currentTimeMillis();
+        Agent currentAgent = null;
+        AgentEventListener toolListener = null;
 
         try {
-            Agent currentAgent = resolveAgent(request.getSessionId());
+            currentAgent = resolveAgent(request.getSessionId());
             if (request.getSystemPrompt() != null && !request.getSystemPrompt().isBlank()) {
                 currentAgent.setSystemPrompt(request.getSystemPrompt());
             }
 
             // 记录工具调用详情
             List<ChatResponse.ToolCallInfo> toolCalls = new ArrayList<>();
-            currentAgent.subscribe(event -> {
+            toolListener = event -> {
                 if (event instanceof ToolExecutionStartEvent e) {
                     toolCalls.add(new ChatResponse.ToolCallInfo(
                             e.getToolCall().getName(),
                             e.getToolCall().getArguments(),
                             null));
                 }
-            });
+            };
+            currentAgent.subscribe(toolListener);
 
             CompletableFuture<AgentContext> future = currentAgent.prompt(request.getMessage());
             AgentContext ctx = future.get(60, TimeUnit.SECONDS);
@@ -220,6 +266,10 @@ public class ChatController {
         } catch (Exception e) {
             log.error("Tool chat error", e);
             return ChatResponse.error(e.getMessage());
+        } finally {
+            if (currentAgent != null && toolListener != null) {
+                currentAgent.unsubscribe(toolListener);
+            }
         }
     }
 

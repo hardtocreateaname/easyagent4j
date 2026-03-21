@@ -130,9 +130,21 @@ public class EasyAgentAutoConfiguration {
             log.info("Using default LLM provider: {}", defaultProvider.getName());
             return new ProviderChatModelAdapter(defaultProvider);
         }
-        
+
+        if (chatModels == null || chatModels.isEmpty()) {
+            String configuredProvider = (providerName == null || providerName.isBlank()) ? "<none>" : providerName;
+            throw new IllegalStateException(
+                "No chat model available for EasyAgent4j. " +
+                    "Configured provider: '" + configuredProvider + "'. " +
+                    "No LlmProvider beans were registered and no Spring AI ChatModel beans were found. " +
+                    "Add a provider module and enable it via 'easyagent.provider.<name>.enabled=true', " +
+                    "or include/configure a compatible Spring AI starter such as 'spring-ai-starter-model-openai' " +
+                    "with matching 'spring.ai.model.chat' and API settings."
+            );
+        }
+
         // Fallback到Spring AI ChatModel（兼容旧版）
-        String beanName = switch (providerName.toLowerCase()) {
+        String beanName = switch ((providerName == null || providerName.isBlank()) ? "openai" : providerName.toLowerCase()) {
             case "zhipuai", "zhipu" -> "zhiPuAiChatModel";
             case "openai" -> "openAiChatModel";
             default -> "openAiChatModel";
@@ -142,10 +154,11 @@ public class EasyAgentAutoConfiguration {
         if (springChatModel == null) {
             // Fallback to first available
             springChatModel = chatModels.values().iterator().next();
-            log.warn("Requested chat model '{}' not found, using first available", beanName);
+            log.warn("Requested chat model '{}' not found, using first available from {}", beanName, chatModels.keySet());
+        } else {
+            log.info("Using Spring AI chat model: {}", beanName);
         }
 
-        log.info("Using Spring AI chat model: {}", beanName);
         return new SpringAiChatModelAdapter(springChatModel);
     }
 

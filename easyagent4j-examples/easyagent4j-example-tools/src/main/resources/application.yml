@@ -18,9 +18,9 @@ spring:
       api-key: ${ZHIPU_API_KEY:YOUR_API_KEY}
       chat:
         options:
-          model: glm-4-flash
+          model: glm-5-turbo
           temperature: 0.7
 
 logging:
   level:
-    com.easyagent4j: DEBUG
+    com.easyagent4j: INFO

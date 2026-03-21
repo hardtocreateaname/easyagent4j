@@ -223,6 +223,7 @@ public class AgentLoop {
         StringBuilder content = new StringBuilder();
         AssistantMessage message = new AssistantMessage();
         final java.util.concurrent.atomic.AtomicInteger chunkCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        CountDownLatch completion = new CountDownLatch(1);
 
         eventPublisher.publish(new MessageStartEvent(context, message));
 
@@ -237,7 +238,19 @@ public class AgentLoop {
             if (chunk.getToolCalls() != null && !chunk.getToolCalls().isEmpty()) {
                 message.setToolCalls(chunk.getToolCalls());
             }
+            if (chunk.isFinished()) {
+                completion.countDown();
+            }
         });
+
+        try {
+            if (!completion.await(60, TimeUnit.SECONDS)) {
+                throw new RuntimeException("Chat model stream timed out");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting for chat model stream", e);
+        }
 
         log.debug("Stream completed, total chunks: {}, total content length: {}", chunkCount.get(), content.length());
         eventPublisher.publish(new MessageEndEvent(context, message));

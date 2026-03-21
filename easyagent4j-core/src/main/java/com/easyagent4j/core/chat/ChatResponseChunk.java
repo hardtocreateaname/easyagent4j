@@ -21,6 +21,7 @@ public class ChatResponseChunk {
     public String getText() { return text; }
     public void setText(String text) { this.text = text; }
     public List<ToolCall> getToolCalls() { return toolCalls; }
+    public void setToolCalls(List<ToolCall> toolCalls) { this.toolCalls = toolCalls; }
     public boolean isFinished() { return finished; }
     public void setFinished(boolean finished) { this.finished = finished; }
 }
